@@ -39,7 +39,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.kuralpay.app.ui.components.BottomBarSpace
@@ -114,7 +116,7 @@ fun ForwardingScreen(
             }
         }
 
-        item { MyNumberCard(state.myPhone, state.busy, viewModel::saveMyPhone, Modifier.entrance(2)) }
+        item { MyNumberCard(state.myPhone, state.myName, state.busy, viewModel::saveMyPhone, Modifier.entrance(2)) }
 
         item {
             Column(Modifier.entrance(3).kpCard().padding(horizontal = 16.dp)) {
@@ -133,6 +135,7 @@ fun ForwardingScreen(
             items(state.requestsToMe, key = { it.id }) { link ->
                 Column(Modifier.fillMaxWidth().kpCard(20.dp).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text("${link.fromName.ifBlank { "Someone" }} wants to forward payments to you", style = MaterialTheme.typography.bodyLarge, color = c.text)
+                    link.fromPhone?.let { Text(PhoneNumber.pretty(it), style = MaterialTheme.typography.bodySmall, color = c.muted) }
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         Pill("Accept", filled = true) { viewModel.respond(link, true) }
                         Pill("Decline", filled = false) { viewModel.respond(link, false) }
@@ -149,14 +152,17 @@ fun ForwardingScreen(
                 Column(Modifier.fillMaxWidth().kpCard().padding(horizontal = 16.dp)) {
                     state.sendingTo.forEachIndexed { i, link ->
                         if (i > 0) Hairline()
-                        PersonRow(
+                        LinkedPerson(
+                            key = link.id,
                             name = link.toName.ifBlank { "KuralPay user" },
+                            phone = link.toPhone,
                             detail = when {
                                 link.status == LinkStatus.PENDING -> "Waiting for them to accept"
                                 link.muted -> "Accepted, but they muted you"
                                 else -> "Hears your payments"
                             },
-                            trailing = { Text("Remove", style = MaterialTheme.typography.labelMedium, color = c.muted, modifier = Modifier.kpClickable { viewModel.unlink(link) }.padding(8.dp)) }
+                            removeQuestion = "Stop forwarding your payments to them?",
+                            onRemove = { viewModel.unlink(link) }
                         )
                     }
                 }
@@ -171,15 +177,14 @@ fun ForwardingScreen(
                 Column(Modifier.fillMaxWidth().kpCard().padding(horizontal = 16.dp)) {
                     state.receivingFrom.forEachIndexed { i, link ->
                         if (i > 0) Hairline()
-                        PersonRow(
+                        LinkedPerson(
+                            key = link.id,
                             name = link.fromName.ifBlank { "KuralPay user" },
+                            phone = link.fromPhone,
                             detail = if (link.muted) "Muted" else "Announcing their payments",
-                            trailing = {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    KpSwitch(!link.muted, { on -> viewModel.setMuted(link, !on) })
-                                    Text("Remove", style = MaterialTheme.typography.labelMedium, color = c.muted, modifier = Modifier.kpClickable { viewModel.unlink(link) }.padding(8.dp))
-                                }
-                            }
+                            removeQuestion = "Stop hearing their payments on this phone?",
+                            onRemove = { viewModel.unlink(link) },
+                            extra = { KpSwitch(!link.muted, { on -> viewModel.setMuted(link, !on) }) }
                         )
                     }
                 }
@@ -206,29 +211,52 @@ private fun Messages(state: ForwardingState, onDismiss: () -> Unit) {
 }
 
 @Composable
-private fun MyNumberCard(saved: String?, busy: Boolean, onSave: (String) -> Unit, modifier: Modifier = Modifier) {
+private fun MyNumberCard(saved: String?, savedName: String?, busy: Boolean, onSave: (String, String) -> Unit, modifier: Modifier = Modifier) {
     val c = Kp.colors
-    var draft by rememberSaveable(saved) { mutableStateOf("") }
+    // Prefilled with what is saved, so a wrong number or name can simply be edited.
+    var draft by rememberSaveable(saved) { mutableStateOf(saved?.removePrefix("+91").orEmpty()) }
+    var name by rememberSaveable(savedName) { mutableStateOf(savedName.orEmpty()) }
     Column(modifier.fillMaxWidth().kpCard(22.dp).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text("My mobile number", style = MaterialTheme.typography.titleMedium, color = c.text)
+        Text("My name and number", style = MaterialTheme.typography.titleMedium, color = c.text)
         Text(
-            if (saved != null) "Others find you with ${PhoneNumber.pretty(saved)}. You can change it below."
-            else "Add the number others will use to find you.",
+            if (saved != null) "Linked people see you as ${savedName ?: "you"}, ${PhoneNumber.pretty(saved)}. Edit and save to change."
+            else "Add the name and number others will use to find you.",
             style = MaterialTheme.typography.bodySmall,
             color = c.muted
         )
-        NumberRow(draft, { draft = it }, if (saved != null) "Change number" else "Save number", busy) { onSave(draft) }
+        NameField(name, { name = it }, "Your name or shop name")
+        NumberRow(draft, { draft = it }, if (saved != null) "Save changes" else "Save", busy) { onSave(draft, name) }
     }
 }
 
 @Composable
-private fun AddByNumber(busy: Boolean, onRequest: (String) -> Unit, modifier: Modifier = Modifier) {
+private fun AddByNumber(busy: Boolean, onRequest: (String, String) -> Unit, modifier: Modifier = Modifier) {
     val c = Kp.colors
     var draft by rememberSaveable { mutableStateOf("") }
+    var name by rememberSaveable { mutableStateOf("") }
     Column(modifier.fillMaxWidth().kpCard(22.dp).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text("Add a person", style = MaterialTheme.typography.titleMedium, color = c.text)
-        Text("Enter their KuralPay mobile number. They must accept before anything is forwarded.", style = MaterialTheme.typography.bodySmall, color = c.muted)
-        NumberRow(draft, { draft = it }, "Send request", busy) { onRequest(draft); draft = "" }
+        Text("Enter their name and KuralPay mobile number. They must accept before anything is forwarded.", style = MaterialTheme.typography.bodySmall, color = c.muted)
+        NameField(name, { name = it }, "Their name (optional)")
+        NumberRow(draft, { draft = it }, "Send request", busy) { onRequest(draft, name); draft = ""; name = "" }
+    }
+}
+
+@Composable
+private fun NameField(value: String, onChange: (String) -> Unit, hint: String) {
+    val c = Kp.colors
+    val shape = RoundedCornerShape(12.dp)
+    Box(Modifier.fillMaxWidth().clip(shape).background(c.deck2).border(1.dp, c.line, shape).padding(horizontal = 12.dp, vertical = 12.dp)) {
+        if (value.isEmpty()) Text(hint, style = MaterialTheme.typography.bodyMedium, color = c.muted)
+        BasicTextField(
+            value = value,
+            onValueChange = { onChange(it.take(40)) },
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words),
+            textStyle = MaterialTheme.typography.bodyMedium.copy(color = c.text),
+            cursorBrush = SolidColor(c.royal),
+            modifier = Modifier.fillMaxWidth()
+        )
     }
 }
 
@@ -268,18 +296,51 @@ private fun NumberRow(value: String, onChange: (String) -> Unit, action: String,
     }
 }
 
+/** A linked person with name, number and status, and a Remove that asks before unlinking. */
 @Composable
-private fun PersonRow(name: String, detail: String, trailing: @Composable () -> Unit) {
+private fun LinkedPerson(
+    key: String,
+    name: String,
+    phone: String?,
+    detail: String,
+    removeQuestion: String,
+    onRemove: () -> Unit,
+    extra: (@Composable () -> Unit)? = null
+) {
     val c = Kp.colors
-    Row(Modifier.fillMaxWidth().padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        Box(Modifier.size(40.dp).clip(CircleShape).background(c.deck2), contentAlignment = Alignment.Center) {
-            Text(name.firstOrNull()?.uppercase() ?: "?", style = MaterialTheme.typography.titleMedium, color = c.accent)
+    var confirming by rememberSaveable(key) { mutableStateOf(false) }
+    Column(Modifier.fillMaxWidth().padding(vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Box(Modifier.size(40.dp).clip(CircleShape).background(c.deck2), contentAlignment = Alignment.Center) {
+                Text(name.firstOrNull()?.uppercase() ?: "?", style = MaterialTheme.typography.titleMedium, color = c.accent)
+            }
+            Column(Modifier.weight(1f)) {
+                Text(name, style = MaterialTheme.typography.bodyLarge, color = c.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                phone?.let { Text(PhoneNumber.pretty(it), style = MaterialTheme.typography.bodySmall, color = c.muted) }
+                Text(detail, style = MaterialTheme.typography.bodySmall, color = c.muted)
+            }
+            extra?.invoke()
+            if (!confirming) {
+                Text("Remove", style = MaterialTheme.typography.labelMedium, color = c.warn, modifier = Modifier.kpClickable { confirming = true }.padding(8.dp))
+            }
         }
-        Column(Modifier.weight(1f)) {
-            Text(name, style = MaterialTheme.typography.bodyLarge, color = c.text, maxLines = 1)
-            Text(detail, style = MaterialTheme.typography.bodySmall, color = c.muted)
+        AnimatedVisibility(confirming) {
+            Column(
+                Modifier.fillMaxWidth().kpCard(14.dp, fill = c.warn.copy(alpha = 0.10f)).padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text("Remove $name? $removeQuestion", style = MaterialTheme.typography.bodyMedium, color = c.text)
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        "Remove",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = c.onRoyal,
+                        modifier = Modifier.kpClickable { confirming = false; onRemove() }.clip(RoundedCornerShape(12.dp)).background(c.warn).padding(horizontal = 18.dp, vertical = 10.dp)
+                    )
+                    Pill("Cancel", filled = false) { confirming = false }
+                }
+            }
         }
-        trailing()
     }
 }
 

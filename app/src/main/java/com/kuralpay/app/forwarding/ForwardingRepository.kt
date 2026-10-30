@@ -26,7 +26,9 @@ data class Link(
     val fromName: String,
     val toName: String,
     val status: LinkStatus,
-    val muted: Boolean
+    val muted: Boolean,
+    val fromPhone: String? = null,
+    val toPhone: String? = null
 )
 
 data class ForwardedPayment(
@@ -37,7 +39,7 @@ data class ForwardedPayment(
     val timestamp: Long
 )
 
-data class MyProfile(val phone: String?)
+data class MyProfile(val phone: String?, val name: String? = null)
 
 @Singleton
 class ForwardingRepository @Inject constructor(
@@ -52,17 +54,17 @@ class ForwardingRepository @Inject constructor(
         if (user == null) flowOf(MyProfile(null))
         else callbackFlow {
             val reg = db.collection("users").document(user.uid).addSnapshotListener { snap, _ ->
-                trySend(MyProfile(snap?.getString("phone")))
+                trySend(MyProfile(snap?.getString("phone"), snap?.getString("displayName")?.takeIf { it.isNotBlank() }))
             }
             awaitClose { reg.remove() }
         }
     }
 
-    /** Claims [raw] as my number. Fails if someone else already holds it. */
-    suspend fun setMyPhone(raw: String) {
+    /** Claims [raw] as my number, shown to others as [displayName]. Fails if someone else already holds the number. */
+    suspend fun setMyPhone(raw: String, displayName: String) {
         val phone = PhoneNumber.normalize(raw) ?: throw AuthException("Enter a valid 10-digit mobile number.")
         val user = me
-        val name = user.displayName?.takeIf { it.isNotBlank() } ?: user.email.orEmpty().substringBefore('@')
+        val name = displayName.trim().take(40).ifBlank { defaultName(user) }
         val userRef = db.collection("users").document(user.uid)
         val newIndex = db.collection("phoneIndex").document(phone)
         try {
@@ -105,7 +107,9 @@ class ForwardingRepository @Inject constructor(
                         fromName = d.getString("fromName").orEmpty(),
                         toName = d.getString("toName").orEmpty(),
                         status = runCatching { LinkStatus.valueOf(d.getString("status").orEmpty().uppercase()) }.getOrDefault(LinkStatus.PENDING),
-                        muted = d.getBoolean("muted") ?: false
+                        muted = d.getBoolean("muted") ?: false,
+                        fromPhone = d.getString("fromPhone"),
+                        toPhone = d.getString("toPhone")
                     )
                 }.orEmpty().sortedBy { it.fromName + it.toName })
             }
@@ -113,22 +117,27 @@ class ForwardingRepository @Inject constructor(
         }
     }
 
-    /** Asks the person with this number to receive my payments. */
-    suspend fun requestLink(rawPhone: String) {
+    /**
+     * Asks the person with this number to receive my payments. [label] is the name I want to see for
+     * them; if blank, the name they gave themselves is used.
+     */
+    suspend fun requestLink(rawPhone: String, label: String) {
         val phone = PhoneNumber.normalize(rawPhone) ?: throw AuthException("Enter a valid 10-digit mobile number.")
         val user = me
         try {
             val target = db.collection("phoneIndex").document(phone).get().await()
             val toUid = target.getString("uid") ?: throw AuthException("No KuralPay user found with that number. Ask them to sign in and add it.")
             if (toUid == user.uid) throw AuthException("That's your own number.")
-            val myName = user.displayName?.takeIf { it.isNotBlank() } ?: user.email.orEmpty().substringBefore('@')
+            val myDoc = db.collection("users").document(user.uid).get().await()
+            val myName = myDoc.getString("displayName")?.takeIf { it.isNotBlank() } ?: defaultName(user)
             val ref = db.collection("links").document("${user.uid}_$toUid")
             // A declined request is replaced by a fresh one; only the recipient may edit it.
             if (ref.get().await().exists()) ref.delete().await()
             ref.set(
                 mapOf(
                     "fromUid" to user.uid, "toUid" to toUid,
-                    "fromName" to myName, "toName" to target.getString("name").orEmpty(),
+                    "fromName" to myName, "toName" to label.trim().take(40).ifBlank { target.getString("name").orEmpty() },
+                    "fromPhone" to myDoc.getString("phone"), "toPhone" to phone,
                     "status" to "pending", "muted" to false, "createdAt" to FieldValue.serverTimestamp()
                 )
             ).await()
@@ -139,6 +148,9 @@ class ForwardingRepository @Inject constructor(
             throw AuthException("Couldn't send the request. Check your connection and try again.")
         }
     }
+
+    private fun defaultName(user: com.google.firebase.auth.FirebaseUser): String =
+        user.displayName?.takeIf { it.isNotBlank() } ?: user.email.orEmpty().substringBefore('@')
 
     suspend fun respond(link: Link, accept: Boolean) {
         db.collection("links").document(link.id).update("status", if (accept) "accepted" else "declined").await()
@@ -157,7 +169,9 @@ class ForwardingRepository @Inject constructor(
     /** Sends one detected payment to everyone who accepted me and hasn't muted me. Only amount and payer leave the phone. */
     suspend fun forward(amount: Double, payer: String) {
         val user = auth.currentUser ?: return
-        val myName = user.displayName?.takeIf { it.isNotBlank() } ?: user.email.orEmpty().substringBefore('@')
+        // The name I saved in KuralPay, so the announcement matches what linked people see in their list.
+        val myName = runCatching { db.collection("users").document(user.uid).get().await().getString("displayName") }
+            .getOrNull()?.takeIf { it.isNotBlank() } ?: defaultName(user)
         val targets = db.collection("links").whereEqualTo("fromUid", user.uid).whereEqualTo("status", "accepted").get().await()
             .documents.filter { it.getBoolean("muted") != true }
         for (target in targets) {

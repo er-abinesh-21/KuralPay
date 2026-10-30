@@ -22,6 +22,7 @@ data class ForwardingState(
     val signedIn: Boolean = false,
     val email: String = "",
     val myPhone: String? = null,
+    val myName: String? = null,
     val requestsToMe: List<Link> = emptyList(),
     val receivingFrom: List<Link> = emptyList(),
     val sendingTo: List<Link> = emptyList(),
@@ -53,6 +54,7 @@ class ForwardingViewModel @Inject constructor(
             signedIn = user != null,
             email = user?.email.orEmpty(),
             myPhone = profile.phone,
+            myName = profile.name,
             requestsToMe = incoming.filter { it.status == LinkStatus.PENDING },
             receivingFrom = incoming.filter { it.status == LinkStatus.ACCEPTED },
             sendingTo = outgoing.filter { it.status != LinkStatus.DECLINED },
@@ -64,8 +66,8 @@ class ForwardingViewModel @Inject constructor(
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), ForwardingState(configured = auth.isConfigured, signedIn = auth.currentUser != null))
 
-    fun saveMyPhone(raw: String) = act("Number saved.") { repository.setMyPhone(raw) }
-    fun requestLink(raw: String) = act("Request sent. They'll see it under Requests.") { repository.requestLink(raw) }
+    fun saveMyPhone(raw: String, name: String) = act("Saved.") { repository.setMyPhone(raw, name) }
+    fun requestLink(raw: String, name: String) = act("Request sent. They'll see it under Requests.") { repository.requestLink(raw, name) }
     fun respond(link: Link, accept: Boolean) = act(null) { repository.respond(link, accept) }
     fun setMuted(link: Link, muted: Boolean) = act(null) { repository.setMuted(link, muted) }
     fun unlink(link: Link) = act(null) { repository.unlink(link) }
