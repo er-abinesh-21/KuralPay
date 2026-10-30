@@ -48,6 +48,9 @@ class SettingsRepository @Inject constructor(
     suspend fun setForwardingEnabled(enabled: Boolean) = preferences.setForwardingEnabled(enabled)
     suspend fun setAcceptForwarded(enabled: Boolean) = preferences.setAcceptForwarded(enabled)
 
+    val retentionDays: Flow<Int> = preferences.retentionDays
+    suspend fun setRetentionDays(days: Int) = preferences.setRetentionDays(days)
+
     val replayCount: Flow<Int> = preferences.replayCount
     suspend fun setReplayCount(count: Int) = preferences.setReplayCount(count)
 

@@ -21,6 +21,12 @@ interface AnnouncementQueueDao {
     @Query("UPDATE announcement_queue SET isReplayed = 1 WHERE id = :id")
     suspend fun markAsReplayed(id: Long)
 
+    @Query("DELETE FROM announcement_queue WHERE timestamp < :cutoff")
+    suspend fun deleteOlderThan(cutoff: Long): Int
+
+    @Query("DELETE FROM announcement_queue")
+    suspend fun deleteAll()
+
     @Query("DELETE FROM announcement_queue WHERE isReplayed = 1")
     suspend fun clearReplayed()
 

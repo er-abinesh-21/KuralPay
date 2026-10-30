@@ -2,6 +2,7 @@ package com.kuralpay.app.settings.ui
 
 import android.content.Intent
 import androidx.lifecycle.ViewModel
+import com.kuralpay.app.account.AuthRepository
 import com.kuralpay.app.voice.tts.PaymentTtsEngine
 import com.kuralpay.app.voice.tts.VoiceProfileMapper
 import androidx.lifecycle.viewModelScope
@@ -25,14 +26,20 @@ data class SettingsState(
     val overlayDuration: Int = 4000,
     val groqApiKey: String = "",
     val maxVolume: Boolean = false,
-    val replayCount: Int = 1
+    val replayCount: Int = 1,
+    val retentionDays: Int = 0,
+    val accountEmail: String = ""
 )
 
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
     private val settingsRepository: SettingsRepository,
-    private val ttsEngine: PaymentTtsEngine
+    private val ttsEngine: PaymentTtsEngine,
+    private val auth: AuthRepository
 ) : ViewModel() {
+
+    fun setRetentionDays(days: Int) = viewModelScope.launch { settingsRepository.setRetentionDays(days) }
+    fun signOut() = auth.signOut()
 
     fun isVoiceReady(profile: VoiceProfile): Boolean = ttsEngine.isVoiceReady(profile)
 
@@ -72,6 +79,12 @@ class SettingsViewModel @Inject constructor(
         }
         viewModelScope.launch {
             settingsRepository.replayCount.collect { n -> _state.update { it.copy(replayCount = n) } }
+        }
+        viewModelScope.launch {
+            settingsRepository.retentionDays.collect { d -> _state.update { it.copy(retentionDays = d) } }
+        }
+        viewModelScope.launch {
+            auth.user.collect { u -> _state.update { it.copy(accountEmail = u?.email.orEmpty()) } }
         }
         viewModelScope.launch {
             settingsRepository.groqApiKey.collect { key ->

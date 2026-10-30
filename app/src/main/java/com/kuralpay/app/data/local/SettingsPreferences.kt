@@ -10,6 +10,7 @@ import androidx.datastore.preferences.preferencesDataStore
 import com.kuralpay.app.domain.model.SummarySlot
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -20,6 +21,10 @@ private val Context.settingsDataStore: DataStore<Preferences> by preferencesData
 class SettingsPreferences @Inject constructor(
     @ApplicationContext private val context: Context
 ) {
+    private companion object {
+        val NEVER_SYNCED = setOf("groq_api_key", "synced_uid")
+    }
+
     private object Keys {
         val OVERLAY_ENABLED = booleanPreferencesKey("overlay_enabled")
         val VOICE_ENABLED = booleanPreferencesKey("voice_enabled")
@@ -35,6 +40,42 @@ class SettingsPreferences @Inject constructor(
         val GROQ_API_KEY = stringPreferencesKey("groq_api_key")
         val MAX_VOLUME = booleanPreferencesKey("max_volume")
         val REPLAY_COUNT = intPreferencesKey("replay_count")
+    }
+
+    /** How long payment history is kept, in days. 0 means forever. */
+    val retentionDays: Flow<Int> = context.settingsDataStore.data.map { it[intPreferencesKey("retention_days")] ?: 0 }
+
+    suspend fun setRetentionDays(days: Int) {
+        context.settingsDataStore.updateData { it.toMutablePreferences().apply { this[intPreferencesKey("retention_days")] = days.coerceAtLeast(0) } }
+    }
+
+    /** The account whose data is on this phone; a different account signing in wipes the old one's local copy. */
+    suspend fun syncedUid(): String? = context.settingsDataStore.data.first()[stringPreferencesKey("synced_uid")]
+
+    suspend fun setSyncedUid(uid: String) {
+        context.settingsDataStore.updateData { it.toMutablePreferences().apply { this[stringPreferencesKey("synced_uid")] = uid } }
+    }
+
+    /** Everything worth backing up. The Groq key and sync bookkeeping never leave the phone. */
+    val syncable: Flow<Map<String, Any>> = context.settingsDataStore.data.map { prefs ->
+        prefs.asMap().entries
+            .filter { it.key.name !in NEVER_SYNCED }
+            .associate { it.key.name to it.value }
+    }
+
+    suspend fun applySynced(values: Map<String, Any?>) {
+        context.settingsDataStore.updateData { current ->
+            current.toMutablePreferences().apply {
+                values.forEach { (name, value) ->
+                    if (name in NEVER_SYNCED) return@forEach
+                    when (value) {
+                        is Boolean -> this[booleanPreferencesKey(name)] = value
+                        is Number -> this[intPreferencesKey(name)] = value.toInt()
+                        is String -> this[stringPreferencesKey(name)] = value
+                    }
+                }
+            }
+        }
     }
 
     fun summaryTime(slot: SummarySlot): Flow<Int> =

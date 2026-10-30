@@ -43,6 +43,18 @@ interface TransactionDao {
     @Query("SELECT * FROM transactions WHERE timestamp >= :start AND timestamp <= :end ORDER BY timestamp DESC")
     fun getTransactionsInRange(start: Long, end: Long): Flow<List<TransactionEntity>>
 
+    @Query("SELECT * FROM transactions ORDER BY timestamp ASC")
+    suspend fun getAllOnce(): List<TransactionEntity>
+
+    @Query("SELECT COUNT(*) FROM transactions WHERE timestamp = :timestamp AND amount = :amount")
+    suspend fun countMatching(timestamp: Long, amount: Double): Int
+
+    @Query("DELETE FROM transactions WHERE timestamp < :cutoff")
+    suspend fun deleteOlderThan(cutoff: Long): Int
+
+    @Query("DELETE FROM transactions")
+    suspend fun deleteAll()
+
     @Query("SELECT * FROM transactions WHERE timestamp >= :startOfDay AND timestamp <= :endOfDay AND sourceApp = :source ORDER BY timestamp DESC")
     fun getTransactionsBySource(source: String, startOfDay: Long, endOfDay: Long): Flow<List<TransactionEntity>>
 }

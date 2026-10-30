@@ -197,7 +197,14 @@ fun SettingsScreen(
             }
         }
 
-        item { AboutEntry(onNavigateToAbout, Modifier.entrance(9).padding(top = 8.dp)) }
+        item { Eyebrow("Data", modifier = Modifier.entrance(9).padding(top = 8.dp)) }
+        item { RetentionCard(state.retentionDays, Modifier.entrance(10)) { viewModel.setRetentionDays(it) } }
+
+        if (state.accountEmail.isNotEmpty()) {
+            item { AccountCard(state.accountEmail, viewModel::signOut, Modifier.entrance(11)) }
+        }
+
+        item { AboutEntry(onNavigateToAbout, Modifier.entrance(12).padding(top = 8.dp)) }
     }
 }
 
@@ -361,6 +368,84 @@ private fun RouteSelector(routes: List<AudioRoute>, selected: AudioRoute, modifi
                 }
             }
         }
+    }
+}
+
+private val RetentionOptions = listOf(0 to "Forever", 30 to "30 days", 90 to "3 months", 180 to "6 months", 365 to "1 year")
+
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun RetentionCard(days: Int, modifier: Modifier = Modifier, onSelect: (Int) -> Unit) {
+    val c = Kp.colors
+    var pending by remember { mutableStateOf<Pair<Int, String>?>(null) }
+    Column(modifier.fillMaxWidth().kpCard().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text("Keep payment history", style = MaterialTheme.typography.bodyLarge, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold, color = c.text)
+            Text(
+                if (days == 0) "Payments are saved to your account and kept forever."
+                else "Payments older than ${RetentionOptions.first { it.first == days }.second} are deleted from this phone and your account every day.",
+                style = MaterialTheme.typography.bodySmall,
+                color = c.muted
+            )
+        }
+        androidx.compose.foundation.layout.FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            RetentionOptions.forEach { (value, label) ->
+                val selected = value == days
+                Text(
+                    label,
+                    style = MaterialTheme.typography.labelLarge,
+                    color = if (selected) c.onRoyal else c.text,
+                    modifier = Modifier
+                        .kpClickable { if (!selected) { if (value == 0) onSelect(0) else pending = value to label } }
+                        .clip(CircleShape)
+                        .background(if (selected) c.royal else c.deck2)
+                        .border(1.dp, if (selected) c.royal else c.line, CircleShape)
+                        .padding(horizontal = 14.dp, vertical = 8.dp)
+                )
+            }
+        }
+    }
+    pending?.let { (value, label) ->
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { pending = null },
+            containerColor = c.deck,
+            title = { Text("Delete older payments?", style = MaterialTheme.typography.titleLarge, color = c.text) },
+            text = {
+                Text(
+                    "Payments older than $label will be deleted from this phone and your account now, and every day after. This can't be undone.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = c.muted
+                )
+            },
+            confirmButton = {
+                androidx.compose.material3.TextButton(onClick = { onSelect(value); pending = null }) {
+                    Text("Delete and keep $label", style = MaterialTheme.typography.labelLarge, color = c.accent)
+                }
+            },
+            dismissButton = {
+                androidx.compose.material3.TextButton(onClick = { pending = null }) {
+                    Text("Cancel", style = MaterialTheme.typography.labelLarge, color = c.muted)
+                }
+            }
+        )
+    }
+}
+
+@Composable
+private fun AccountCard(email: String, onSignOut: () -> Unit, modifier: Modifier = Modifier) {
+    val c = Kp.colors
+    Row(
+        modifier.fillMaxWidth().kpCard().padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text("Signed in as", style = MaterialTheme.typography.bodySmall, color = c.muted)
+            Text(email, style = MaterialTheme.typography.bodyMedium, color = c.text, maxLines = 1)
+        }
+        Text("Sign out", style = MaterialTheme.typography.labelLarge, color = c.accent, modifier = Modifier.kpClickable(onSignOut).padding(8.dp))
     }
 }
 

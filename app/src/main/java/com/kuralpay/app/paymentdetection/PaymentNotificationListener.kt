@@ -8,6 +8,7 @@ import android.util.Log
 import com.kuralpay.app.data.repository.AnnouncementRepository
 import com.kuralpay.app.data.repository.SettingsRepository
 import com.kuralpay.app.data.repository.TransactionRepository
+import com.kuralpay.app.data.sync.CloudSyncRepository
 import com.kuralpay.app.forwarding.ForwardingRepository
 import kotlinx.coroutines.flow.first
 import com.kuralpay.app.domain.model.Announcement
@@ -27,6 +28,7 @@ class PaymentNotificationListener : NotificationListenerService() {
     @Inject lateinit var transactionRepository: TransactionRepository
     @Inject lateinit var announcementRepository: AnnouncementRepository
     @Inject lateinit var forwardingRepository: ForwardingRepository
+    @Inject lateinit var cloudSync: CloudSyncRepository
     @Inject lateinit var settingsRepository: SettingsRepository
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -52,15 +54,15 @@ class PaymentNotificationListener : NotificationListenerService() {
             if (!firstTimeSeen("$source|${parsed.amount}|${body.trim()}")) return@launch
             Log.d(TAG, "Payment ₹${parsed.amount} from '${parsed.sender}' via ${parsed.source} ($source)")
 
-            transactionRepository.recordTransaction(
-                Transaction(
-                    amount = parsed.amount,
-                    sender = parsed.sender,
-                    sourceApp = parsed.source,
-                    timestamp = sbn.postTime,
-                    rawNotification = parsed.rawText
-                )
+            val transaction = Transaction(
+                amount = parsed.amount,
+                sender = parsed.sender,
+                sourceApp = parsed.source,
+                timestamp = sbn.postTime,
+                rawNotification = parsed.rawText
             )
+            transactionRepository.recordTransaction(transaction)
+            cloudSync.uploadTransaction(transaction)
             val announcementId = announcementRepository.enqueue(
                 Announcement(
                     amount = parsed.amount,

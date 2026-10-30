@@ -56,6 +56,8 @@ import com.kuralpay.app.ui.theme.Kp
 fun AuthScreen(
     onBack: () -> Unit = {},
     onSignedIn: () -> Unit = {},
+    /** False on first launch, where signing in is required and there is nowhere to go back to. */
+    showBack: Boolean = true,
     viewModel: AuthViewModel = hiltViewModel()
 ) {
     val c = Kp.colors
@@ -80,15 +82,32 @@ fun AuthScreen(
             .padding(horizontal = 18.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
+        if (!showBack) {
+            Box(Modifier.fillMaxWidth().padding(top = 8.dp).entrance(0), contentAlignment = Alignment.Center) {
+                Box(
+                    Modifier.size(width = 150.dp, height = 139.dp).clip(RoundedCornerShape(26.dp)).background(androidx.compose.ui.graphics.Color.White).padding(10.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    androidx.compose.foundation.Image(
+                        androidx.compose.ui.res.painterResource(com.kuralpay.app.R.drawable.kp_logo_full),
+                        contentDescription = "KuralPay",
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
+            }
+        }
         Row(Modifier.entrance(0), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Box(Modifier.size(42.dp).kpClickable(onBack).kpCard(13.dp), contentAlignment = Alignment.Center) {
-                Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back", tint = c.text, modifier = Modifier.size(20.dp))
+            if (showBack) {
+                Box(Modifier.size(42.dp).kpClickable(onBack).kpCard(13.dp), contentAlignment = Alignment.Center) {
+                    Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back", tint = c.text, modifier = Modifier.size(20.dp))
+                }
             }
             Text(if (creating) "Create account" else "Sign in", style = MaterialTheme.typography.headlineMedium, color = c.text)
         }
 
         Text(
-            "An account lets your payments be announced on another KuralPay phone. KuralPay still works without one.",
+            if (showBack) "Your account keeps your payment history and settings safe in the cloud and lets other KuralPay phones announce your payments."
+            else "Sign in to start. Your payment history and settings are saved to your account, so they come back on a new phone. After this, KuralPay works offline.",
             style = MaterialTheme.typography.bodyMedium,
             color = c.muted,
             modifier = Modifier.entrance(1)

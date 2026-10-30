@@ -63,9 +63,15 @@ import com.kuralpay.app.ui.theme.Kp
 import com.kuralpay.app.ui.theme.KuralPayTheme
 import com.kuralpay.app.voice.tts.AnnouncementService
 import com.kuralpay.app.widgets.WidgetUpdateWorker
+import androidx.compose.runtime.collectAsState
+import androidx.hilt.navigation.compose.hiltViewModel
+import com.kuralpay.app.account.AuthScreen
+import com.kuralpay.app.account.AuthViewModel
 import com.kuralpay.app.summary.DailySummaryScheduler
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
+
+private enum class Stage { SIGN_IN, PERMISSIONS, APP }
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
@@ -91,16 +97,26 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             KuralPayTheme {
-                val ready = overlayGranted && listenerGranted
+                val authViewModel: AuthViewModel = hiltViewModel()
+                val signedIn by authViewModel.signedIn.collectAsState()
+                // First launch needs an account. The login is remembered, so later launches work offline.
+                // Builds without google-services.json skip this so the app still runs.
+                val needsSignIn = authViewModel.configured && !signedIn
+
+                val stage = when {
+                    needsSignIn -> Stage.SIGN_IN
+                    overlayGranted && listenerGranted -> Stage.APP
+                    else -> Stage.PERMISSIONS
+                }
                 AnimatedContent(
-                    targetState = ready,
+                    targetState = stage,
                     transitionSpec = { (fadeIn(tween(400)) + scaleIn(tween(400), initialScale = 0.97f)) togetherWith fadeOut(tween(200)) },
-                    label = "onboarding"
-                ) { isReady ->
-                    if (isReady) {
-                        KuralPayNavGraph(navController = rememberNavController())
-                    } else {
-                        Onboarding(
+                    label = "stage"
+                ) { current ->
+                    when (current) {
+                        Stage.SIGN_IN -> AuthScreen(showBack = false)
+                        Stage.APP -> KuralPayNavGraph(navController = rememberNavController())
+                        Stage.PERMISSIONS -> Onboarding(
                             listenerGranted = listenerGranted,
                             overlayGranted = overlayGranted,
                             onAllowListener = { startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) },

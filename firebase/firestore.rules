@@ -8,6 +8,11 @@ service cloud.firestore {
     // Each person owns their profile.
     match /users/{uid} {
       allow read, write: if signedIn() && request.auth.uid == uid;
+
+      // Payment history and settings backup live under the person's own profile.
+      match /{document=**} {
+        allow read, write: if signedIn() && request.auth.uid == uid;
+      }
     }
 
     // Phone number -> person. A number can be looked up by exact id but never listed.
