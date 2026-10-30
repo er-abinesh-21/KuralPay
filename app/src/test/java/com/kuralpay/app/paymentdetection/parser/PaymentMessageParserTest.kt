@@ -63,6 +63,23 @@ class PaymentMessageParserTest {
     @Test fun paytmReceivedFrom() = accepts("Rs.240 received from Karthik S in your Paytm Wallet", 240.0, "Karthik S")
     @Test fun noSenderGiven() = accepts("₹75 received in your account", 75.0, "")
 
+    // GPay Business notifications (title. text), as posted on a shop's phone.
+
+    @Test fun gpayBusinessReceived() = accepts(
+        "₹20.00 received from Gunalan S at 8:17 PM. The amount will be sent to your bank account.",
+        20.0, "Gunalan S"
+    )
+
+    @Test fun gpayBusinessReceivedInitials() = accepts(
+        "₹39.00 received from K S at 6:14 PM. The amount will be sent to your bank account.",
+        39.0, "K S"
+    )
+
+    @Test fun moneySentOut() = rejects("₹500 sent to Arun Kumar from your account")
+
+    @Test fun gpayBusinessLoanAd() = rejects("Mr S Babu, repay just ₹2999 monthly 🤏. Loans with low EMIs now available on Google Pay for Business. 100% digital. Apply now!")
+    @Test fun gpayBusinessCardOffer() = rejects("Add your Mastercard to earn ₹50 on your first 4 payments")
+
     // Must be ignored.
 
     @Test fun loginAlert() = rejects("Dear Customer, Thanks for logging in to IOB Internet Banking on 30-Oct-26 09:15:43.In case you have not logged in, pls contact 18004254445.IOB")

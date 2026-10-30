@@ -51,7 +51,8 @@ class PaymentNotificationListener : NotificationListenerService() {
 
         scope.launch {
             val parsed = parserEngine.parse(source, title, body) ?: return@launch
-            if (!firstTimeSeen("$source|${parsed.amount}|${body.trim()}")) return@launch
+            // Title too: GPay Business keeps the payer and time there and repeats the same body for every payment.
+            if (!firstTimeSeen("$source|${parsed.amount}|${title.trim()}|${body.trim()}")) return@launch
             Log.d(TAG, "Payment ₹${parsed.amount} from '${parsed.sender}' via ${parsed.source} ($source)")
 
             val transaction = Transaction(

@@ -20,9 +20,9 @@ object PaymentMessageParser {
 
     private val rejectSignals = Regex(
         listOf(
-            // money going out
+            // money going out ("will be sent to your bank account" is GPay Business settling a payment in, so not that)
             """\bdebited\b""", """\bdebit\s+of\b""", """\bspent\b""", """\bwithdrawn?\b""", """\bwithdrawal\b""",
-            """\bpurchase\b""", """\bpaid\s+to\b""", """\bsent\s+to\b""", """\btransferred\s+to\b""", """will\s+be\s+debited""",
+            """\bpurchase\b""", """\bpaid\s+to\b""", """(?<!\bbe\s)\bsent\s+to\b""", """\btransferred\s+to\b""", """will\s+be\s+debited""",
             // reminders and bills
             """\bdue\b""", """\boverdue\b""", """\breminder\b""", """\bpay\s+now\b""", """\bpay\s+before\b""",
             """\bbill\b""", """\bemi\b""", """\boutstanding\b""", """minimum\s+amount""", """\bstatement\b""",
@@ -69,8 +69,8 @@ object PaymentMessageParser {
         // HDFC: "from VPA *9795@ptyes"
         Regex("""\bfrom\s+vpa\s+([\w.*!-]+@[\w.]+)""", IGNORE_CASE),
         // "received ₹500 from Meena R", "from ARUN KUMAR on ..."
-        Regex("""\bfrom\s+([A-Za-z][A-Za-z0-9 .]{1,40}?)(?=\s*(?:\bon\b|\bin\b|\bto\b|\bfor\b|\bvia\b|\bthrough\b|\bref\b|\bupi\b|\(|\.|,|-|$))""", IGNORE_CASE),
-        Regex("""\bby\s+(?!rs\b|inr\b|upi\b|imps\b|neft\b)([A-Za-z][A-Za-z .]{1,40}?)(?=\s*(?:\bon\b|\bin\b|\bto\b|\bfor\b|\bvia\b|\bref\b|\(|\.|,|-|$))""", IGNORE_CASE)
+        Regex("""\bfrom\s+([A-Za-z][A-Za-z0-9 .]{1,40}?)(?=\s*(?:\bon\b|\bat\b|\bin\b|\bto\b|\bfor\b|\bvia\b|\bthrough\b|\bref\b|\bupi\b|\(|\.|,|-|$))""", IGNORE_CASE),
+        Regex("""\bby\s+(?!rs\b|inr\b|upi\b|imps\b|neft\b)([A-Za-z][A-Za-z .]{1,40}?)(?=\s*(?:\bon\b|\bat\b|\bin\b|\bto\b|\bfor\b|\bvia\b|\bref\b|\(|\.|,|-|$))""", IGNORE_CASE)
     )
 
     private val notNames = setOf("your", "a/c", "ac", "account", "bank", "upi", "vpa", "you")

@@ -10,6 +10,8 @@ class PaymentParserEngine @Inject constructor() {
 
     private val paymentApps = mapOf(
         "com.google.android.apps.nbu.paisa.user" to PaymentSource.GOOGLE_PAY,
+        // GPay Business (shop QR payments): "₹20.00 received from Gunalan S at 8:17 PM"
+        "com.google.android.apps.nbu.paisa.merchant" to PaymentSource.GOOGLE_PAY,
         "com.phonepe.app" to PaymentSource.PHONEPE,
         "net.one97.paytm" to PaymentSource.PAYTM,
         "com.amazon.wallet" to PaymentSource.AMAZON_PAY,
