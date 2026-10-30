@@ -13,5 +13,6 @@ google-services.json
 *.jks
 *.keystore
 .kotlin/
+dist/
 .playwright-mcp/
 .claude/

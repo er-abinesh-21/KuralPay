@@ -21,15 +21,15 @@ android {
         minSdk = 31
         targetSdk = 34
         // Release Orbit convention shared with the other apps: versionCode = major*10000 + minor*100 + patch.
-        // .github/workflows/release.yml refuses to publish if these two disagree.
+        // scripts/release-orbit.ps1 refuses to publish if these two disagree.
         versionCode = 10000
         versionName = "1.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
-    // The release key never lives in the repo. CI decodes it from a secret; locally, export the same
-    // variables. Every published APK must keep the signer pinned in release.yml (SIGNER_SHA256).
+    // The release key never lives in the repo; scripts/release-orbit.ps1 points these variables at the
+    // keystore on the release PC. Every published APK must keep the signer pinned there ($SignerSha256).
     val releaseKeystore = System.getenv("KURALPAY_KEYSTORE_FILE")
     signingConfigs {
         if (releaseKeystore != null) {

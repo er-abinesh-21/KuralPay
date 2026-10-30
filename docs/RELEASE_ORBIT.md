@@ -10,34 +10,30 @@ KuralPay APKs are published to the public [Release Orbit](https://github.com/er-
 | versionCode | `major*10000 + minor*100 + patch` (1.2.3 → 10203) |
 | Signer SHA-256 | `7256fe5a11ade58e3f795516a6ac44d5abbeb3ff3d790068dbf0f87e6023ad75` (never change) |
 
-## One-time setup (KuralPay repository settings)
+## How releases are made
 
-**Secrets** (Settings → Secrets and variables → Actions):
+Releases are built and published from the release PC with [`scripts/release-orbit.ps1`](../scripts/release-orbit.ps1). No GitHub secrets, Actions or tokens are involved:
 
-| Name | Value |
-|---|---|
-| `KURALPAY_KEYSTORE_BASE64` | Base64 of the keystore whose certificate is the signer above |
-| `KURALPAY_KEYSTORE_PASSWORD` | Keystore password |
-| `KURALPAY_KEY_ALIAS` | Key alias |
-| `KURALPAY_KEY_PASSWORD` | Key password |
-| `KURALPAY_GOOGLE_SERVICES_JSON_BASE64` | Base64 of `app/google-services.json` (project `kuralpay-abp`) |
-| `RELEASE_ORBIT_APP_PRIVATE_KEY` | Private key of the Release Orbit GitHub App (same app the other projects use) |
-
-**Variable:** `RELEASE_ORBIT_APP_ID`, the GitHub App's ID.
-
-**Environment:** create `release-orbit` and add yourself as a Required reviewer. The publish job waits for that approval.
-
-The GitHub App needs only *Contents: Read and write* on `Release-Orbit`. No personal access token is used, and nothing is embedded in the app.
+- **Signing** uses the keystore on the PC (`~/.android/debug.keystore`, alias `androiddebugkey`), whose certificate is the signer above. Back this file up somewhere private; if it is lost, installed apps can no longer be updated in place. Anyone who has it can sign updates, so never commit or share it.
+- **Publishing** uses your own `gh` login (`gh auth status`), which needs write access to `Release-Orbit`.
+- `app/google-services.json` must be present, so sign-in and cloud sync are built in.
 
 ## Publishing a version
 
 1. Bump `versionName` and `versionCode` in `app/build.gradle.kts`, for example `1.0.1` and `10001`.
 2. Add `docs/release-notes/v1.0.1.md`. Its text is shown in the app as *What's new*.
-3. Commit and push.
-4. Actions → **Release to Release Orbit** → Run workflow with version `1.0.1`.
-   - Leave **publish** off first: a dry run that builds, signs and validates the APK.
-   - Run again with **publish** on, then approve the `release-orbit` environment.
-5. The workflow checks the public download matches the built APK. Installed apps see the update within 6 hours, or immediately from *Settings → Check for updates*.
+3. Commit.
+4. Dry run: runs the unit tests, builds and signs, validates the package, version, signer and "not debuggable", checks the versionCode is higher than the last KuralPay release, and writes `dist/KuralPay-v1.0.1.apk` plus `.sha256`. Nothing is uploaded.
+   ```powershell
+   .\scripts\release-orbit.ps1 -Version 1.0.1
+   ```
+5. Publish: does the same, asks you to type the version to confirm, creates the release, then checks the public, unauthenticated download matches the built APK.
+   ```powershell
+   .\scripts\release-orbit.ps1 -Version 1.0.1 -Publish
+   ```
+6. Installed apps see the update within 6 hours, or immediately from *Settings → Check for updates*.
+
+If PowerShell blocks the script, run it with `powershell -ExecutionPolicy Bypass -File scripts\release-orbit.ps1 ...`.
 
 ## What the app checks before installing
 
