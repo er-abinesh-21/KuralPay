@@ -1,6 +1,7 @@
 package com.kuralpay.app
 
 import android.Manifest
+import android.app.ActivityManager
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -81,6 +82,10 @@ class MainActivity : ComponentActivity() {
     private var overlayGranted by mutableStateOf(false)
     private var listenerGranted by mutableStateOf(false)
 
+    // Android Go (low-RAM) phones switch "Display over other apps" off for every app, so the
+    // lock-screen card can never be allowed there. Announcements work without it.
+    private val overlaySupported by lazy { !getSystemService(ActivityManager::class.java).isLowRamDevice }
+
     private val requestPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { _ -> }
@@ -105,7 +110,7 @@ class MainActivity : ComponentActivity() {
 
                 val stage = when {
                     needsSignIn -> Stage.SIGN_IN
-                    overlayGranted && listenerGranted -> Stage.APP
+                    listenerGranted && (overlayGranted || !overlaySupported) -> Stage.APP
                     else -> Stage.PERMISSIONS
                 }
                 AnimatedContent(
@@ -119,6 +124,7 @@ class MainActivity : ComponentActivity() {
                         Stage.PERMISSIONS -> Onboarding(
                             listenerGranted = listenerGranted,
                             overlayGranted = overlayGranted,
+                            overlaySupported = overlaySupported,
                             onAllowListener = { startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) },
                             onAllowOverlay = {
                                 startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
@@ -167,6 +173,7 @@ class MainActivity : ComponentActivity() {
 private fun Onboarding(
     listenerGranted: Boolean,
     overlayGranted: Boolean,
+    overlaySupported: Boolean,
     onAllowListener: () -> Unit,
     onAllowOverlay: () -> Unit
 ) {
@@ -197,7 +204,8 @@ private fun Onboarding(
                 Image(painterResource(R.drawable.kp_logo_full), contentDescription = "KuralPay, the voice of digital payments", modifier = Modifier.fillMaxSize())
             }
             Text(
-                "Hear every UPI payment the moment it lands. Two permissions and you're ready.",
+                if (overlaySupported) "Hear every UPI payment the moment it lands. Two permissions and you're ready."
+                else "Hear every UPI payment the moment it lands. One permission and you're ready.",
                 style = MaterialTheme.typography.bodyLarge,
                 color = c.muted,
                 textAlign = TextAlign.Center
@@ -213,16 +221,19 @@ private fun Onboarding(
                 onAllowListener,
                 Modifier.entrance(1)
             )
-            PermissionStep(
-                Icons.Rounded.Layers,
-                "Show over other apps",
-                "For the payment card on your lock screen",
-                overlayGranted,
-                onAllowOverlay,
-                Modifier.entrance(2)
-            )
+            if (overlaySupported) {
+                PermissionStep(
+                    Icons.Rounded.Layers,
+                    "Show over other apps",
+                    "For the payment card on your lock screen",
+                    overlayGranted,
+                    onAllowOverlay,
+                    Modifier.entrance(2)
+                )
+            }
             Text(
-                "Turn both on in the screen that opens, then come back here.",
+                if (overlaySupported) "Turn both on in the screen that opens, then come back here."
+                else "Turn it on in the screen that opens, then come back here.",
                 style = MaterialTheme.typography.bodySmall,
                 color = c.muted,
                 textAlign = TextAlign.Center,
