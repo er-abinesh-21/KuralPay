@@ -1,0 +1,238 @@
+# Build a signed KuralPay APK and publish it to Release Orbit
+# (er-abinesh-21/Release-Orbit, public) as tag KuralPay/vX.Y.Z.
+#
+# Two separate safety switches:
+#   - "publish" input defaults to off: the run only builds and validates (dry run).
+#   - the publish job uses the "release-orbit" environment; set Required reviewers on it
+#     so nothing reaches Release Orbit without an explicit approval.
+#
+# Before running:
+#   1. Bump versionName/versionCode in app/build.gradle.kts
+#      (versionCode = major*10000 + minor*100 + patch) and push.
+#   2. Optional: add docs/release-notes/vX.Y.Z.md; it becomes the release body ("What's new" in the app).
+#
+# Secrets and variables: see docs/RELEASE_ORBIT.md.
+
+name: Release to Release Orbit
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version (X.Y.Z), must equal versionName in app/build.gradle.kts"
+        required: true
+        type: string
+      publish:
+        description: "Publish to Release Orbit (off = dry run: build and validate only)"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-orbit-kuralpay
+  cancel-in-progress: false
+
+env:
+  ORBIT_REPO: er-abinesh-21/Release-Orbit
+  TAG_PREFIX: KuralPay/v
+  APP_ID: com.kuralpay.app
+  # Signing identity of every KuralPay APK ever installed. Must never change, or
+  # existing installs can no longer update in place.
+  SIGNER_SHA256: 7256fe5a11ade58e3f795516a6ac44d5abbeb3ff3d790068dbf0f87e6023ad75
+
+jobs:
+  build:
+    name: Build & validate signed APK
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+      apk: ${{ steps.meta.outputs.apk }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate version and tag
+        id: meta
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          [[ "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] \
+            || { echo "::error::version must be X.Y.Z (got '$VERSION')"; exit 1; }
+          IFS=. read -r MA MI PA <<< "$VERSION"
+          EXPECTED_CODE=$(( MA*10000 + MI*100 + PA ))
+
+          GRADLE=app/build.gradle.kts
+          NAME=$(sed -nE 's/^\s*versionName\s*=\s*"([^"]+)".*/\1/p' "$GRADLE")
+          CODE=$(sed -nE 's/^\s*versionCode\s*=\s*([0-9]+).*/\1/p' "$GRADLE")
+          [[ "$NAME" == "$VERSION" ]] || { echo "::error::build.gradle.kts versionName is '$NAME', expected '$VERSION'"; exit 1; }
+          [[ "$CODE" == "$EXPECTED_CODE" ]] || { echo "::error::build.gradle.kts versionCode is '$CODE', expected $EXPECTED_CODE"; exit 1; }
+
+          TAG="${TAG_PREFIX}${VERSION}"
+          STATUS=$(curl -s -o /dev/null -w '%{http_code}' \
+            "https://api.github.com/repos/${ORBIT_REPO}/releases/tags/${TAG}")
+          [[ "$STATUS" == "404" ]] || { echo "::error::Release Orbit already has $TAG (HTTP $STATUS)"; exit 1; }
+
+          {
+            echo "tag=$TAG"
+            echo "apk=KuralPay-v${VERSION}.apk"
+            echo "code=$CODE"
+          } >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: gradle
+
+      - name: Add Firebase config
+        env:
+          GOOGLE_SERVICES_JSON_BASE64: ${{ secrets.KURALPAY_GOOGLE_SERVICES_JSON_BASE64 }}
+        run: |
+          set -euo pipefail
+          # Without it the app would build with sign-in and cloud sync switched off.
+          [[ -n "$GOOGLE_SERVICES_JSON_BASE64" ]] || { echo "::error::KURALPAY_GOOGLE_SERVICES_JSON_BASE64 is not set"; exit 1; }
+          echo "$GOOGLE_SERVICES_JSON_BASE64" | base64 -d > app/google-services.json
+          jq -e '.project_info.project_id and (.client | length > 0)' app/google-services.json > /dev/null \
+            || { echo "::error::google-services.json secret is not valid"; exit 1; }
+
+      - name: Unit tests
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon testDebugUnitTest
+
+      - name: Build signed release APK
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KURALPAY_KEYSTORE_BASE64 }}
+          KURALPAY_KEYSTORE_PASSWORD: ${{ secrets.KURALPAY_KEYSTORE_PASSWORD }}
+          KURALPAY_KEY_ALIAS: ${{ secrets.KURALPAY_KEY_ALIAS }}
+          KURALPAY_KEY_PASSWORD: ${{ secrets.KURALPAY_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          [[ -n "$KEYSTORE_BASE64" ]] || { echo "::error::KURALPAY_KEYSTORE_BASE64 is not set"; exit 1; }
+          export KURALPAY_KEYSTORE_FILE="$RUNNER_TEMP/kuralpay.keystore"
+          echo "$KEYSTORE_BASE64" | base64 -d > "$KURALPAY_KEYSTORE_FILE"
+          ./gradlew --no-daemon assembleRelease
+          rm -f "$KURALPAY_KEYSTORE_FILE" app/google-services.json
+
+      - name: Validate APK (package, version, signer, debuggable)
+        env:
+          VERSION: ${{ inputs.version }}
+          APK_NAME: ${{ steps.meta.outputs.apk }}
+          CODE: ${{ steps.meta.outputs.code }}
+        run: |
+          set -euo pipefail
+          BT="$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)"
+          SRC=app/build/outputs/apk/release/app-release.apk
+          [[ -f "$SRC" ]] || { echo "::error::$SRC not found (unsigned build?)"; exit 1; }
+          mkdir -p dist-apk && cp "$SRC" "dist-apk/$APK_NAME"
+          APK="dist-apk/$APK_NAME"
+
+          BADGING=$("$BT/aapt2" dump badging "$APK")
+          echo "$BADGING" | head -1
+          PKG=$(echo "$BADGING" | sed -nE "s/^package: name='([^']+)'.*/\1/p")
+          VC=$(echo "$BADGING" | sed -nE "s/^package: .*versionCode='([0-9]+)'.*/\1/p")
+          VN=$(echo "$BADGING" | sed -nE "s/^package: .*versionName='([^']+)'.*/\1/p")
+          [[ "$PKG" == "$APP_ID" ]] || { echo "::error::package is $PKG"; exit 1; }
+          [[ "$VN" == "$VERSION" ]] || { echo "::error::versionName is $VN"; exit 1; }
+          [[ "$VC" == "$CODE" ]] || { echo "::error::versionCode is $VC"; exit 1; }
+          if echo "$BADGING" | grep -q "application-debuggable"; then
+            echo "::error::APK is debuggable"; exit 1
+          fi
+
+          CERT=$("$BT/apksigner" verify --print-certs "$APK" | sed -nE 's/^Signer #1 certificate SHA-256 digest: ([0-9a-f]+)$/\1/p')
+          [[ "$CERT" == "$SIGNER_SHA256" ]] || { echo "::error::signed with $CERT, expected $SIGNER_SHA256"; exit 1; }
+
+          # versionCode must exceed the highest published KuralPay release (tags with this exact prefix only).
+          PREV_URL=$(curl -sf "https://api.github.com/repos/${ORBIT_REPO}/releases?per_page=100" | jq -r --arg p "$TAG_PREFIX" '
+            [ .[] | select(.draft|not) | select(.prerelease|not) | select(.tag_name|startswith($p))
+              | {v: (.tag_name|ltrimstr($p)), a: (.assets[] | select(.name|endswith(".apk")) | .browser_download_url)}
+              | select(.v|test("^[0-9]+\\.[0-9]+\\.[0-9]+$")) ]
+            | sort_by(.v|split(".")|map(tonumber)) | last | .a // empty')
+          if [[ -n "$PREV_URL" ]]; then
+            curl -sfL -o "$RUNNER_TEMP/prev.apk" "$PREV_URL"
+            PREV_VC=$("$BT/aapt2" dump badging "$RUNNER_TEMP/prev.apk" | sed -nE "s/^package: .*versionCode='([0-9]+)'.*/\1/p")
+            echo "Previous release versionCode: $PREV_VC ($PREV_URL)"
+            (( VC > PREV_VC )) || { echo "::error::versionCode $VC is not greater than $PREV_VC"; exit 1; }
+          else
+            echo "No earlier KuralPay release on Release Orbit."
+          fi
+
+          (cd dist-apk && sha256sum "$APK_NAME" > "$APK_NAME.sha256" && cat "$APK_NAME.sha256")
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kuralpay-apk
+          path: dist-apk/
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    name: Publish to Release Orbit
+    needs: build
+    if: ${{ inputs.publish }}
+    runs-on: ubuntu-latest
+    environment: release-orbit
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: docs/release-notes
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: kuralpay-apk
+          path: dist-apk
+
+      - name: Mint Release Orbit token (GitHub App)
+        id: app-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.RELEASE_ORBIT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_ORBIT_APP_PRIVATE_KEY }}
+          owner: er-abinesh-21
+          repositories: Release-Orbit
+          permission-contents: write
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          TAG: ${{ needs.build.outputs.tag }}
+          APK_NAME: ${{ needs.build.outputs.apk }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          NOTES_FILE="docs/release-notes/v${VERSION}.md"
+          if [[ ! -f "$NOTES_FILE" ]]; then
+            NOTES_FILE="$RUNNER_TEMP/notes.md"
+            printf '# KuralPay v%s\n\nImprovements and fixes.\n' "$VERSION" > "$NOTES_FILE"
+          fi
+          gh release create "$TAG" \
+            --repo "$ORBIT_REPO" \
+            --target main \
+            --title "KuralPay - v${VERSION}" \
+            --notes-file "$NOTES_FILE" \
+            "dist-apk/$APK_NAME" \
+            "dist-apk/$APK_NAME.sha256"
+
+      - name: Verify public, unauthenticated download
+        env:
+          TAG: ${{ needs.build.outputs.tag }}
+          APK_NAME: ${{ needs.build.outputs.apk }}
+        run: |
+          set -euo pipefail
+          URL="https://github.com/${ORBIT_REPO}/releases/download/${TAG}/${APK_NAME}"
+          for i in 1 2 3 4 5; do
+            curl -sfL -o "$RUNNER_TEMP/public.apk" "$URL" && break
+            sleep 5
+          done
+          EXPECTED=$(cut -d' ' -f1 "dist-apk/$APK_NAME.sha256")
+          ACTUAL=$(sha256sum "$RUNNER_TEMP/public.apk" | cut -d' ' -f1)
+          [[ "$EXPECTED" == "$ACTUAL" ]] || { echo "::error::public APK hash mismatch"; exit 1; }
+
+          # The in-app updater must see this as a stable KuralPay release with exactly one matching APK.
+          curl -sf "https://api.github.com/repos/${ORBIT_REPO}/releases/tags/${TAG}" \
+            | jq -e --arg n "$APK_NAME" '.draft == false and .prerelease == false and ([.assets[] | select(.name == $n)] | length == 1)' >/dev/null \
+            || { echo "::error::release metadata check failed"; exit 1; }
+          echo "Published: $URL"

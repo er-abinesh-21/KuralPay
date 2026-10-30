@@ -10,6 +10,8 @@ local.properties
 *.hprof
 *.log
 google-services.json
+*.jks
+*.keystore
 .kotlin/
 .playwright-mcp/
 .claude/

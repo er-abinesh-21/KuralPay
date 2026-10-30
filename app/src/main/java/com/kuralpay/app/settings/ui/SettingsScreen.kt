@@ -41,6 +41,7 @@ import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Key
 import androidx.compose.material.icons.rounded.Layers
 import androidx.compose.material.icons.rounded.Lock
+import androidx.compose.material.icons.rounded.SystemUpdate
 import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material.icons.rounded.Schedule
@@ -112,6 +113,7 @@ fun SettingsScreen(
     onNavigateToSummary: () -> Unit = {},
     onNavigateToForwarding: () -> Unit = {},
     onNavigateToAbout: () -> Unit = {},
+    onCheckUpdates: () -> Unit = {},
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
     val state by viewModel.state.collectAsState()
@@ -204,7 +206,17 @@ fun SettingsScreen(
             item { AccountCard(state.accountEmail, viewModel::signOut, Modifier.entrance(11)) }
         }
 
-        item { AboutEntry(onNavigateToAbout, Modifier.entrance(12).padding(top = 8.dp)) }
+        item {
+            Column(Modifier.entrance(12).kpCard().padding(horizontal = 16.dp)) {
+                SettingRow(
+                    Icons.Rounded.SystemUpdate, "Check for updates", "Version ${appVersion()} · updates come from Release Orbit",
+                    modifier = Modifier.kpClickable(onCheckUpdates)
+                ) {
+                    Icon(Icons.Rounded.ChevronRight, contentDescription = null, tint = c.muted)
+                }
+            }
+        }
+        item { AboutEntry(onNavigateToAbout, Modifier.entrance(13).padding(top = 8.dp)) }
     }
 }
 

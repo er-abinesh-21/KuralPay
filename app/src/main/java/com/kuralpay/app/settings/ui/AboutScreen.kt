@@ -58,7 +58,7 @@ fun appVersion(): String {
 }
 
 @Composable
-fun AboutScreen(onBack: () -> Unit = {}) {
+fun AboutScreen(onBack: () -> Unit = {}, onCheckUpdates: () -> Unit = {}) {
     val c = Kp.colors
     val version = appVersion()
     val logoPop = remember { Animatable(0.85f) }
@@ -106,15 +106,27 @@ fun AboutScreen(onBack: () -> Unit = {}) {
                 )
             }
             VoiceWave(color = c.lime, bars = 9, barWidth = 4.dp, height = 30.dp)
-            Text(
-                "Version $version",
-                style = MaterialTheme.typography.labelMedium,
-                color = c.accent,
-                modifier = Modifier
-                    .clip(CircleShape)
-                    .background(c.accent.copy(alpha = 0.14f))
-                    .padding(horizontal = 14.dp, vertical = 6.dp)
-            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "Version $version",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = c.accent,
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .background(c.accent.copy(alpha = 0.14f))
+                        .padding(horizontal = 14.dp, vertical = 6.dp)
+                )
+                Text(
+                    "Check for updates",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = c.onLime,
+                    modifier = Modifier
+                        .kpClickable(onCheckUpdates)
+                        .clip(CircleShape)
+                        .background(c.lime)
+                        .padding(horizontal = 14.dp, vertical = 6.dp)
+                )
+            }
         }
 
         // Maker

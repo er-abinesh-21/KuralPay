@@ -1,5 +1,6 @@
 package com.kuralpay.app.di
 
+import com.kuralpay.app.BuildConfig
 import com.kuralpay.app.data.remote.GroqApi
 import dagger.Module
 import dagger.Provides
@@ -23,7 +24,9 @@ object NetworkModule {
     fun provideOkHttpClient(): OkHttpClient {
         return OkHttpClient.Builder()
             .addInterceptor(HttpLoggingInterceptor().apply {
-                level = HttpLoggingInterceptor.Level.BODY
+                // Request bodies and headers carry the Groq key; never log them in release builds.
+                level = if (BuildConfig.DEBUG) HttpLoggingInterceptor.Level.BODY else HttpLoggingInterceptor.Level.NONE
+                redactHeader("Authorization")
             })
             .connectTimeout(30, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)

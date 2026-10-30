@@ -113,6 +113,9 @@ class PaymentTtsEngine @Inject constructor(
 
     // speak() is called from coroutine threads while onDone arrives on the TTS binder thread,
     // so queue access is synchronized; otherwise two utterances can start together and cut each other off.
+    /** True while a payment is being announced or waiting to be; the updater never installs during this. */
+    val isBusy: Boolean get() = synchronized(this) { isSpeaking || utteranceQueue.isNotEmpty() }
+
     fun speak(text: String, profile: VoiceProfile, onDone: (() -> Unit)? = null) {
         synchronized(this) { utteranceQueue.add(Utterance(text, profile, onDone = onDone)) }
         processQueue()

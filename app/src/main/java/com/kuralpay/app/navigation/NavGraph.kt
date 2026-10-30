@@ -33,7 +33,11 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.hilt.navigation.compose.hiltViewModel
+import com.kuralpay.app.update.ui.UpdateHost
+import com.kuralpay.app.update.ui.UpdateViewModel
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -84,6 +88,10 @@ fun KuralPayNavGraph(
     val current = backStack?.destination
     val showBar = Tabs.any { tab -> current?.hierarchy?.any { it.route == tab.route } == true }
 
+    // Quiet update check on launch; never blocks startup or announcements.
+    val updates: UpdateViewModel = hiltViewModel()
+    LaunchedEffect(Unit) { updates.checkOnLaunch() }
+
     fun goTab(route: String) {
         navController.navigate(route) {
             popUpTo(navController.graph.findStartDestination().id) { saveState = true }
@@ -115,7 +123,8 @@ fun KuralPayNavGraph(
                 SettingsScreen(
                     onNavigateToSummary = { navController.navigate(Routes.SUMMARY) },
                     onNavigateToForwarding = { navController.navigate(Routes.FORWARDING) },
-                    onNavigateToAbout = { navController.navigate(Routes.ABOUT) }
+                    onNavigateToAbout = { navController.navigate(Routes.ABOUT) },
+                    onCheckUpdates = updates::checkNow
                 )
             }
             composable(
@@ -143,7 +152,7 @@ fun KuralPayNavGraph(
                 enterTransition = { slideIntoContainer(AnimatedContentTransitionScope.SlideDirection.Start, tween(320)) + fadeIn() },
                 popExitTransition = { slideOutOfContainer(AnimatedContentTransitionScope.SlideDirection.End, tween(280)) + fadeOut() }
             ) {
-                AboutScreen(onBack = { navController.popBackStack() })
+                AboutScreen(onBack = { navController.popBackStack() }, onCheckUpdates = updates::checkNow)
             }
             composable(
                 Routes.SUMMARY,
@@ -165,6 +174,8 @@ fun KuralPayNavGraph(
                 onSelect = ::goTab
             )
         }
+
+        UpdateHost(updates, onHome = current?.route == Routes.DASHBOARD)
     }
 }
 
