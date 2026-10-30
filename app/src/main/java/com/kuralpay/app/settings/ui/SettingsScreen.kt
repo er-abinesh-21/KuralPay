@@ -67,6 +67,11 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import com.kuralpay.app.lockscreenoverlay.OverlayAccess
 import com.kuralpay.app.domain.model.AudioRoute
 import com.kuralpay.app.domain.model.VoiceProfile
 import com.kuralpay.app.ui.components.BottomBarSpace
@@ -118,6 +123,18 @@ fun SettingsScreen(
 ) {
     val state by viewModel.state.collectAsState()
     val c = Kp.colors
+    val context = LocalContext.current
+    val overlaySupported = remember { OverlayAccess.supported(context) }
+    var overlayAllowed by remember { mutableStateOf(OverlayAccess.granted(context)) }
+    // Coming back from Android's "Display over other apps" screen. (LifecycleResumeEffect needs Compose UI 1.7.)
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) overlayAllowed = OverlayAccess.granted(context)
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize().background(c.ink).statusBarsPadding(),
@@ -129,8 +146,25 @@ fun SettingsScreen(
         item { Eyebrow("Alerts", modifier = Modifier.entrance(1)) }
         item {
             Column(Modifier.entrance(2).kpCard().padding(horizontal = 16.dp)) {
-                SettingRow(Icons.Rounded.Layers, "Lock screen card", "Show each payment over any app") {
-                    KpSwitch(state.overlayEnabled, { viewModel.toggleOverlay() })
+                SettingRow(
+                    Icons.Rounded.Layers,
+                    "Lock screen card",
+                    when {
+                        !overlaySupported -> "Not available on this phone. Payments are still spoken."
+                        !overlayAllowed -> "Needs \"Display over other apps\". Turn on to allow it."
+                        else -> "Show each payment over any app"
+                    }
+                ) {
+                    KpSwitch(state.overlayEnabled && overlayAllowed, { on ->
+                        when {
+                            !overlaySupported -> Unit
+                            on && !overlayAllowed -> {
+                                if (!state.overlayEnabled) viewModel.toggleOverlay()
+                                context.startActivity(OverlayAccess.settingsIntent(context))
+                            }
+                            else -> viewModel.toggleOverlay()
+                        }
+                    })
                 }
                 Hairline()
                 SettingRow(Icons.AutoMirrored.Rounded.VolumeUp, "Speak payments aloud", "Announce each payment as it arrives") {

@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -42,7 +43,10 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.unit.isSpecified
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -294,13 +298,32 @@ private fun QuickAction(icon: ImageVector, label: String, modifier: Modifier, on
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         IconTile(icon, c.royal)
-        Text(
-            label,
-            style = MaterialTheme.typography.labelMedium,
-            color = c.text,
-            maxLines = 2,
-            textAlign = androidx.compose.ui.text.style.TextAlign.Center
-        )
+        FittedLabel(label, MaterialTheme.typography.labelMedium, c.text)
+    }
+}
+
+/**
+ * Centered label of up to two lines that shrinks its text (down to 9sp) until every word fits on a line,
+ * so narrow screens or large display sizes never split a word like "Summarie-s".
+ */
+@Composable
+private fun FittedLabel(text: String, style: TextStyle, color: Color) {
+    BoxWithConstraints(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+        val measurer = rememberTextMeasurer()
+        val widthPx = constraints.maxWidth
+        val fitted = remember(text, style, widthPx) {
+            val words = text.split(' ')
+            var s = style
+            fun tooWide(s: TextStyle) = words.any { measurer.measure(it, s, softWrap = false, maxLines = 1).size.width > widthPx }
+            while (s.fontSize.value > 9f && tooWide(s)) {
+                s = s.copy(
+                    fontSize = s.fontSize * 0.92f,
+                    lineHeight = if (s.lineHeight.isSpecified) s.lineHeight * 0.92f else s.lineHeight
+                )
+            }
+            s
+        }
+        Text(text, style = fitted, color = color, maxLines = 2, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
     }
 }
 
