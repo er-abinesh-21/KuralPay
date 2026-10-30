@@ -31,7 +31,13 @@ service cloud.firestore {
 
     // A link from a sender to a recipient. Id is "<fromUid>_<toUid>".
     match /links/{linkId} {
-      allow read: if signedIn()
+      // Before sending a request the app checks whether its own link already exists; a missing
+      // document has no resource.data, so allow that check by the id's sender part instead.
+      allow get: if signedIn() && (
+        (resource == null && linkId.split('_')[0] == request.auth.uid)
+        || (resource != null
+            && (resource.data.fromUid == request.auth.uid || resource.data.toUid == request.auth.uid)));
+      allow list: if signedIn()
         && (resource.data.fromUid == request.auth.uid || resource.data.toUid == request.auth.uid);
 
       allow create: if signedIn()
