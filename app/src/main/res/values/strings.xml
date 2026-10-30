@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">KuralPay</string>
+    <string name="notification_listener">Payment Notification Listener</string>
+    <string name="overlay_channel">Payment Overlay</string>
+    <string name="announcement_channel">Voice Announcements</string>
+    <string name="health_channel">Audio Health</string>
+    <string name="widget_small_desc">Today\'s collection</string>
+    <string name="widget_medium_desc">Today\'s collection and payment count</string>
+    <string name="widget_large_desc">Today\'s collection and last payment</string>
+</resources>

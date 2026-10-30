@@ -1,0 +1,62 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() { return request.auth != null; }
+
+    // Each person owns their profile.
+    match /users/{uid} {
+      allow read, write: if signedIn() && request.auth.uid == uid;
+    }
+
+    // Phone number -> person. A number can be looked up by exact id but never listed.
+    match /phoneIndex/{phone} {
+      allow get: if signedIn();
+      allow create: if signedIn()
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.keys().hasOnly(['uid', 'name']);
+      allow update, delete: if signedIn() && resource.data.uid == request.auth.uid
+        && request.resource.data.uid == request.auth.uid;
+    }
+
+    // A link from a sender to a recipient. Id is "<fromUid>_<toUid>".
+    match /links/{linkId} {
+      allow read: if signedIn()
+        && (resource.data.fromUid == request.auth.uid || resource.data.toUid == request.auth.uid);
+
+      allow create: if signedIn()
+        && request.resource.data.fromUid == request.auth.uid
+        && request.resource.data.fromUid != request.resource.data.toUid
+        && linkId == request.auth.uid + '_' + request.resource.data.toUid
+        && request.resource.data.status == 'pending'
+        && request.resource.data.muted == false;
+
+      // Only the recipient decides: accept, decline, mute.
+      allow update: if signedIn()
+        && resource.data.toUid == request.auth.uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'muted'])
+        && request.resource.data.status in ['pending', 'accepted', 'declined'];
+
+      allow delete: if signedIn()
+        && (resource.data.fromUid == request.auth.uid || resource.data.toUid == request.auth.uid);
+    }
+
+    // Forwarded payments waiting in a recipient's inbox.
+    match /inbox/{toUid}/forwards/{id} {
+      allow create: if signedIn()
+        && request.resource.data.fromUid == request.auth.uid
+        && request.resource.data.keys().hasOnly(['fromUid', 'fromName', 'amount', 'payer', 'ts', 'heard'])
+        && request.resource.data.amount is number
+        && request.resource.data.amount > 0
+        && request.resource.data.heard == false
+        && get(/databases/$(database)/documents/links/$(request.auth.uid + '_' + toUid)).data.status == 'accepted'
+        && get(/databases/$(database)/documents/links/$(request.auth.uid + '_' + toUid)).data.muted == false;
+
+      allow read, delete: if signedIn() && request.auth.uid == toUid;
+
+      allow update: if signedIn() && request.auth.uid == toUid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['heard']);
+    }
+  }
+}
