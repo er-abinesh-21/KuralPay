@@ -6,6 +6,7 @@ import androidx.hilt.work.HiltWorker
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import com.kuralpay.app.data.local.dao.AnnouncementQueueDao
+import com.kuralpay.app.data.local.dao.ForwardedPaymentDao
 import com.kuralpay.app.data.local.dao.TransactionDao
 import com.kuralpay.app.data.repository.SettingsRepository
 import dagger.assisted.Assisted
@@ -20,6 +21,7 @@ class RetentionWorker @AssistedInject constructor(
     private val settings: SettingsRepository,
     private val transactionDao: TransactionDao,
     private val announcementDao: AnnouncementQueueDao,
+    private val forwardedDao: ForwardedPaymentDao,
     private val cloud: CloudSyncRepository
 ) : CoroutineWorker(context, params) {
 
@@ -30,6 +32,7 @@ class RetentionWorker @AssistedInject constructor(
         val cutoff = System.currentTimeMillis() - days * DAY_MS
         val local = transactionDao.deleteOlderThan(cutoff)
         announcementDao.deleteOlderThan(cutoff)
+        forwardedDao.deleteOlderThan(cutoff)
         val remote = try {
             cloud.deleteOlderThan(cutoff)
         } catch (e: Exception) {

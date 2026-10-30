@@ -36,7 +36,9 @@ data class ForwardedPayment(
     val fromName: String,
     val amount: Double,
     val payer: String,
-    val timestamp: Long
+    val timestamp: Long,
+    /** False when it waited in the inbox while this phone was off: list it, but don't read it out. */
+    val fresh: Boolean = true
 )
 
 data class MyProfile(val phone: String?, val name: String? = null)
@@ -208,18 +210,17 @@ class ForwardingRepository @Inject constructor(
                         val d = change.document
                         val ts = d.getLong("ts") ?: now
                         d.reference.update("heard", true)
-                        // Anything older than an hour waited while this phone was off; don't read out stale news.
-                        if (now - ts <= STALE_AFTER_MS) {
-                            trySend(
-                                ForwardedPayment(
-                                    id = d.id,
-                                    fromName = d.getString("fromName").orEmpty(),
-                                    amount = d.getDouble("amount") ?: return@forEach,
-                                    payer = d.getString("payer").orEmpty(),
-                                    timestamp = ts
-                                )
+                        trySend(
+                            ForwardedPayment(
+                                id = d.id,
+                                fromName = d.getString("fromName").orEmpty(),
+                                amount = d.getDouble("amount") ?: return@forEach,
+                                payer = d.getString("payer").orEmpty(),
+                                timestamp = ts,
+                                // Anything older than an hour waited while this phone was off; don't read out stale news.
+                                fresh = now - ts <= STALE_AFTER_MS
                             )
-                        }
+                        )
                     }
                 }
             awaitClose { reg.remove() }

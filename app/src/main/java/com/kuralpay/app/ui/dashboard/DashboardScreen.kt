@@ -52,6 +52,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.kuralpay.app.R
 import com.kuralpay.app.domain.model.Transaction
+import com.kuralpay.app.forwarding.ForwardedPayment
 import com.kuralpay.app.insights.ui.InsightStrip
 import com.kuralpay.app.ui.components.AnimatedAmount
 import com.kuralpay.app.ui.components.BottomBarSpace
@@ -131,18 +132,22 @@ fun DashboardScreen(
                 onAction = onNavigateToAnalytics
             )
         }
-        if (state.recentTransactions.isEmpty()) {
+        if (state.recent.isEmpty()) {
             item { EmptyPayments(Modifier.entrance(7)) }
         } else {
             item {
                 Column(Modifier.kpCard(22.dp).padding(6.dp).entrance(7)) {
                     val todayStart = remember { startOfToday() }
-                    state.recentTransactions.forEachIndexed { i, tx ->
-                        TransactionRow(
-                            tx,
-                            Modifier.entrance(8 + i, offset = 10.dp),
-                            onReplay = if (tx.timestamp >= todayStart) ({ viewModel.replayPayment(tx) }) else null
-                        )
+                    state.recent.forEachIndexed { i, entry ->
+                        val rowModifier = Modifier.entrance(8 + i, offset = 10.dp)
+                        when (entry) {
+                            is RecentEntry.Own -> TransactionRow(
+                                entry.tx,
+                                rowModifier,
+                                onReplay = if (entry.tx.timestamp >= todayStart) ({ viewModel.replayPayment(entry.tx) }) else null
+                            )
+                            is RecentEntry.Forwarded -> ForwardedRow(entry.payment, rowModifier)
+                        }
                     }
                 }
             }
@@ -370,6 +375,47 @@ fun TransactionRow(tx: Transaction, modifier: Modifier = Modifier, onReplay: (()
                 Icon(Icons.Rounded.Replay, contentDescription = "Replay this payment", tint = c.accent, modifier = Modifier.size(18.dp))
             }
         }
+    }
+}
+
+/** A payment a linked KuralPay user forwarded here: marked with the forward arrow and who sent it, not counted in the total. */
+@Composable
+private fun ForwardedRow(payment: ForwardedPayment, modifier: Modifier = Modifier) {
+    val c = Kp.colors
+    Row(
+        modifier.fillMaxWidth().padding(10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Box(
+            Modifier.size(40.dp).clip(RoundedCornerShape(12.dp)).background(c.accent.copy(alpha = 0.14f)),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(Icons.AutoMirrored.Rounded.Send, contentDescription = "Forwarded payment", tint = c.accent, modifier = Modifier.size(20.dp))
+        }
+        Column(Modifier.weight(1f)) {
+            Text(
+                payerName(payment.payer) ?: "Payment received",
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.SemiBold,
+                color = c.text,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                "Forwarded by ${payment.fromName.ifBlank { "KuralPay user" }} · ${formatTime(payment.timestamp)}",
+                style = MaterialTheme.typography.bodySmall,
+                color = c.muted,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+        Text(
+            "₹${formatInr(payment.amount)}",
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold,
+            color = c.accent
+        )
     }
 }
 

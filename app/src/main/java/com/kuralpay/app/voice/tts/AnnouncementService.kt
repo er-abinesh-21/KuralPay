@@ -4,6 +4,8 @@ import android.app.Service
 import android.content.Intent
 import android.os.IBinder
 import com.kuralpay.app.NotificationHelper
+import com.kuralpay.app.data.local.dao.ForwardedPaymentDao
+import com.kuralpay.app.data.local.entity.ForwardedPaymentEntity
 import com.kuralpay.app.data.repository.AnnouncementRepository
 import com.kuralpay.app.data.repository.SettingsRepository
 import com.kuralpay.app.domain.model.ParsedPayment
@@ -27,6 +29,7 @@ class AnnouncementService : Service() {
     @Inject lateinit var settingsRepository: SettingsRepository
     @Inject lateinit var queueManager: AnnouncementQueueManager
     @Inject lateinit var forwardingRepository: ForwardingRepository
+    @Inject lateinit var forwardedPaymentDao: ForwardedPaymentDao
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -42,6 +45,9 @@ class AnnouncementService : Service() {
     private suspend fun observeForwarded() {
         forwardingRepository.incomingPayments.collect { fwd ->
             if (!settingsRepository.acceptForwarded.first()) return@collect
+            // Listed on Home with a forwarded mark; never added to this phone's own totals.
+            runCatching { forwardedPaymentDao.insert(ForwardedPaymentEntity.fromDomain(fwd)) }
+            if (!fwd.fresh) return@collect
             PaymentEventBus.emit(
                 ParsedPayment(
                     amount = fwd.amount,

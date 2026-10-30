@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.Send
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -86,7 +87,7 @@ fun PaymentOverlayContent(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            Eyebrow("Payment received", c.good)
+            Eyebrow(if (payment.forwardedFrom != null) "Payment forwarded" else "Payment received", if (payment.forwardedFrom != null) c.accent else c.good)
             AnimatedAmount(
                 amount = payment.amount,
                 style = MaterialTheme.typography.displayLarge,
@@ -103,7 +104,16 @@ fun PaymentOverlayContent(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                SourceBadge(payment.source, 34.dp)
+                if (payment.forwardedFrom != null) {
+                    Box(
+                        Modifier.size(34.dp).clip(RoundedCornerShape(10.dp)).background(c.accent.copy(alpha = 0.14f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(Icons.AutoMirrored.Rounded.Send, contentDescription = "Forwarded payment", tint = c.accent, modifier = Modifier.size(18.dp))
+                    }
+                } else {
+                    SourceBadge(payment.source, 34.dp)
+                }
                 Column {
                     Text(
                         payerName(payment.sender) ?: "Payment received",

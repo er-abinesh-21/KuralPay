@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.room.Room
 import com.kuralpay.app.data.local.AppDatabase
 import com.kuralpay.app.data.local.dao.AnnouncementQueueDao
+import com.kuralpay.app.data.local.dao.ForwardedPaymentDao
 import com.kuralpay.app.data.local.dao.PaymentTemplateDao
 import com.kuralpay.app.data.local.dao.TransactionDao
 import dagger.Module
@@ -24,7 +25,7 @@ object DatabaseModule {
             context,
             AppDatabase::class.java,
             "kuralpay_db"
-        ).build()
+        ).addMigrations(AppDatabase.MIGRATION_1_2).build()
     }
 
     @Provides
@@ -35,4 +36,7 @@ object DatabaseModule {
 
     @Provides
     fun provideAnnouncementQueueDao(db: AppDatabase): AnnouncementQueueDao = db.announcementQueueDao()
+
+    @Provides
+    fun provideForwardedPaymentDao(db: AppDatabase): ForwardedPaymentDao = db.forwardedPaymentDao()
 }

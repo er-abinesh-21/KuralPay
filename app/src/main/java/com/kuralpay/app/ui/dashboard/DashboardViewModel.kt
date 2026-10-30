@@ -17,7 +17,16 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import com.kuralpay.app.data.local.dao.ForwardedPaymentDao
+import com.kuralpay.app.forwarding.ForwardedPayment
 import javax.inject.Inject
+
+/** One line in Recent payments: a payment this phone received, or one a linked user forwarded. */
+sealed interface RecentEntry {
+    val timestamp: Long
+    data class Own(val tx: Transaction) : RecentEntry { override val timestamp get() = tx.timestamp }
+    data class Forwarded(val payment: ForwardedPayment) : RecentEntry { override val timestamp get() = payment.timestamp }
+}
 
 data class DashboardState(
     val todayTotal: Double = 0.0,
@@ -26,6 +35,7 @@ data class DashboardState(
     val maxAmount: Double = 0.0,
     val lastTransaction: Transaction? = null,
     val recentTransactions: List<Transaction> = emptyList(),
+    val recent: List<RecentEntry> = emptyList(),
     val insights: List<Insight> = emptyList(),
     val missedCount: Int = 0,
     val replayCount: Int = 1,
@@ -39,7 +49,8 @@ class DashboardViewModel @Inject constructor(
     private val insightsEngine: SmartInsightsEngine,
     private val replayManager: ReplayManager,
     announcementRepository: AnnouncementRepository,
-    settingsRepository: SettingsRepository
+    settingsRepository: SettingsRepository,
+    forwardedPaymentDao: ForwardedPaymentDao
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(DashboardState())
@@ -50,10 +61,16 @@ class DashboardViewModel @Inject constructor(
             combine(
                 analyticsRepository.getTodayStats(),
                 transactionRepository.getLastTransaction(),
-                transactionRepository.getAllTransactions()
-            ) { stats, last, all ->
-                Triple(stats, last, all)
-            }.collect { (stats, last, all) ->
+                transactionRepository.getAllTransactions(),
+                forwardedPaymentDao.getRecent(RECENT_LIMIT)
+            ) { stats, last, all, forwarded ->
+                val recent = (all.take(RECENT_LIMIT).map { RecentEntry.Own(it) } +
+                    forwarded.map { RecentEntry.Forwarded(it.toDomain()) })
+                    .sortedByDescending { it.timestamp }
+                    .take(RECENT_LIMIT)
+                Triple(stats, last, all to recent)
+            }.collect { (stats, last, lists) ->
+                val (all, recent) = lists
                 _state.update {
                     it.copy(
                         todayTotal = stats.total,
@@ -61,7 +78,8 @@ class DashboardViewModel @Inject constructor(
                         average = stats.average,
                         maxAmount = stats.maxAmount,
                         lastTransaction = last,
-                        recentTransactions = all.take(8),
+                        recentTransactions = all.take(RECENT_LIMIT),
+                        recent = recent,
                         loaded = true
                     )
                 }
@@ -92,4 +110,8 @@ class DashboardViewModel @Inject constructor(
     }
 
     fun replayPayment(tx: Transaction) = replayManager.replayPayment(tx.amount, tx.sender, tx.sourceApp)
+
+    private companion object {
+        const val RECENT_LIMIT = 8
+    }
 }
