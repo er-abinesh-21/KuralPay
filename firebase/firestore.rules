@@ -21,8 +21,12 @@ service cloud.firestore {
       allow create: if signedIn()
         && request.resource.data.uid == request.auth.uid
         && request.resource.data.keys().hasOnly(['uid', 'name']);
-      allow update, delete: if signedIn() && resource.data.uid == request.auth.uid
-        && request.resource.data.uid == request.auth.uid;
+      allow update: if signedIn() && resource.data.uid == request.auth.uid
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.keys().hasOnly(['uid', 'name']);
+      // A delete has no request.resource, so it may only check the current owner.
+      // Changing your number deletes the old entry in the same transaction.
+      allow delete: if signedIn() && resource.data.uid == request.auth.uid;
     }
 
     // A link from a sender to a recipient. Id is "<fromUid>_<toUid>".
