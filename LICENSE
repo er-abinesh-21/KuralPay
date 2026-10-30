@@ -1,6 +1,6 @@
 MIT License
 
-Copyright (c) 2026 Abinesh B
+Copyright (c) 2026 Abinesh B, ABP - Ventures
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -19,3 +19,28 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+--------------------------------------------------------------------------------
+
+Brand assets
+
+The MIT license above covers the source code. It does not grant rights to the
+"KuralPay" name, the KuralPay logo and icon artwork (app/src/main/res/drawable/
+kp_logo_*.png, ic_launcher_* and app/src/main/res/mipmap-*), or the developer
+photograph (app/src/main/res/drawable/developer_photo.jpg). These remain
+(c) 2026 Abinesh B, ABP - Ventures, all rights reserved. If you publish a fork,
+give it your own name and artwork.
+
+--------------------------------------------------------------------------------
+
+Third-party fonts
+
+The app bundles these fonts in app/src/main/res/font/, each licensed under the
+SIL Open Font License, Version 1.1 (https://openfontlicense.org):
+
+  Lexend       Copyright 2018 The Lexend Project Authors
+  Mukta Malar  Copyright 2016 Ek Type
+
+The "G" mark in app/src/main/res/drawable/ic_google.xml is a trademark of
+Google LLC, used only on the "Continue with Google" button as Google's sign-in
+branding guidelines describe.
