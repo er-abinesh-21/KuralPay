@@ -11,6 +11,7 @@ import com.kuralpay.app.summary.DailySummaryScheduler
 import com.kuralpay.app.voice.tts.AnnouncementService
 import com.kuralpay.app.widgets.WidgetUpdateWorker
 import dagger.hilt.android.AndroidEntryPoint
+import com.kuralpay.app.update.UpdateManager
 import javax.inject.Inject
 
 /**
@@ -25,6 +26,7 @@ class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         when (intent.action) {
             Intent.ACTION_BOOT_COMPLETED, Intent.ACTION_MY_PACKAGE_REPLACED -> {
+                if (intent.action == Intent.ACTION_MY_PACKAGE_REPLACED) UpdateManager.announceIfJustUpdated(context)
                 WidgetUpdateWorker.schedule(context)
                 dailySummaryScheduler.syncWithSettings()
                 startAnnouncementServices(context)

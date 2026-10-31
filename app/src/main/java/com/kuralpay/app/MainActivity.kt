@@ -69,6 +69,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.kuralpay.app.account.AuthScreen
 import com.kuralpay.app.account.AuthViewModel
 import com.kuralpay.app.summary.DailySummaryScheduler
+import com.kuralpay.app.update.UpdateManager
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
 
@@ -78,6 +79,7 @@ private enum class Stage { SIGN_IN, PERMISSIONS, APP }
 class MainActivity : ComponentActivity() {
 
     @Inject lateinit var dailySummaryScheduler: DailySummaryScheduler
+    @Inject lateinit var updateManager: UpdateManager
 
     private var overlayGranted by mutableStateOf(false)
     private var listenerGranted by mutableStateOf(false)
@@ -138,6 +140,12 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    /** Leaving KuralPay is the moment a downloaded automatic update installs, so it never closes the app in use. */
+    override fun onStop() {
+        super.onStop()
+        updateManager.onAppBackgrounded()
     }
 
     override fun onResume() {

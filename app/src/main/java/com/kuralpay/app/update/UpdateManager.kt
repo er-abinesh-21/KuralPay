@@ -63,7 +63,7 @@ class UpdateManager @Inject constructor(
     private val tts: PaymentTtsEngine
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
-    private val prefs get() = context.getSharedPreferences("release_orbit", Context.MODE_PRIVATE)
+    private val prefs get() = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
     private val updatesDir get() = File(context.cacheDir, "updates")
 
     private val _state = MutableStateFlow<UpdateState>(UpdateState.Idle)
@@ -102,12 +102,24 @@ class UpdateManager @Inject constructor(
             ?: BuildConfig.VERSION_NAME
     }
 
-    /** Quiet background check on launch, at most once per [AUTO_INTERVAL_MS]. Never blocks startup. */
+    /**
+     * Quiet background check on launch, never blocking startup. With automatic updates on, it runs at most
+     * hourly and downloads a newer version straight away; otherwise every [AUTO_INTERVAL_MS] and it asks.
+     */
     fun checkOnLaunch() {
         cleanupLeftovers()
         val last = prefs.getLong(KEY_LAST_AUTO, 0)
-        if (System.currentTimeMillis() - last < AUTO_INTERVAL_MS) return
+        val interval = if (_autoInstall.value) AUTO_INSTALL_INTERVAL_MS else AUTO_INTERVAL_MS
+        if (System.currentTimeMillis() - last < interval) return
         scope.launch { check(manual = false) }
+    }
+
+    /** KuralPay left the screen (MainActivity.onStop): a downloaded automatic update installs now. */
+    fun onAppBackgrounded() {
+        val ready = _state.value as? UpdateState.ReadyToInstall ?: return
+        if (!_autoInstall.value) return
+        work?.cancel()
+        work = scope.launch { installWhenQuiet(ready, notify = true) }
     }
 
     /** "Check for updates" from Settings or About. */
@@ -142,7 +154,12 @@ class UpdateManager @Inject constructor(
             // A quiet check only ever surfaces an update, never errors or "up to date".
             if (next is UpdateState.Available && next.update.version != dismissedThisSession && !busyWithUpdate()) {
                 _state.value = next
-                _autoPromptPending.value = true
+                if (_autoInstall.value) {
+                    work?.cancel()
+                    work = scope.launch { downloadThenInstall(next.update) }
+                } else {
+                    _autoPromptPending.value = true
+                }
             }
             return
         }
@@ -178,20 +195,32 @@ class UpdateManager @Inject constructor(
         work = scope.launch { downloadAndVerify(update) }
     }
 
-    /** Downloads and verifies [update]; on success the state is ReadyToInstall or NeedsInstallPermission. */
-    private suspend fun downloadAndVerify(update: AvailableUpdate): File? {
+    /**
+     * Downloads and verifies [update]; on success the state is ReadyToInstall or NeedsInstallPermission.
+     * [notify] shows the progress in a notification (automatic updates, where no sheet is on screen).
+     */
+    private suspend fun downloadAndVerify(update: AvailableUpdate, notify: Boolean = false): File? {
         val target = File(updatesDir, kuralPayApkName(update.version))
         try {
             _state.value = UpdateState.Downloading(update, 0, update.apk.size)
+            if (notify) progressNotification("Downloading KuralPay ${update.version}", "Starting…", 0)
+            var lastPercent = -1
             val expectedSha = update.checksum?.let { runCatching { ReleaseSelector.parseSha256(downloader.downloadText(it.downloadUrl)) }.getOrNull() }
             val actualSha = downloader.download(update.apk.downloadUrl, target, update.apk.size) { done, total ->
                 _state.value = UpdateState.Downloading(update, done, total)
+                val percent = if (total > 0) (done * 100 / total).toInt() else 0
+                if (notify && percent >= lastPercent + 5) {
+                    lastPercent = percent
+                    progressNotification("Downloading KuralPay ${update.version}", "$percent% · ${done / 1_048_576} of ${total / 1_048_576} MB", percent)
+                }
             }
             _state.value = UpdateState.Verifying(update)
+            if (notify) progressNotification("Checking KuralPay ${update.version}", "Making sure it's genuine and signed by KuralPay…", null)
             return when (val check = verifier.verify(target, update.apk.size, expectedSha, actualSha)) {
                 is ApkCheck.Rejected -> {
                     target.delete()
                     _state.value = UpdateState.Failed("${check.reason}. The update was not installed.", update)
+                    if (notify) doneNotification("KuralPay update stopped", "${check.reason}. Nothing was installed.")
                     null
                 }
                 is ApkCheck.Accepted -> {
@@ -209,6 +238,7 @@ class UpdateManager @Inject constructor(
             Log.w(TAG, "Update download failed: ${e.javaClass.simpleName}")
             target.delete()
             _state.value = UpdateState.Failed("The download didn't finish. Check your connection and try again.", update)
+            if (notify) doneNotification("KuralPay update paused", "The download didn't finish. It will try again later.")
             return null
         }
     }
@@ -235,10 +265,10 @@ class UpdateManager @Inject constructor(
     fun install(activityContext: Context) {
         val s = _state.value as? UpdateState.ReadyToInstall ?: return
         work?.cancel()
-        work = scope.launch { installWhenQuiet(s) }
+        work = scope.launch { installWhenQuiet(s, notify = false) }
     }
 
-    private suspend fun installWhenQuiet(ready: UpdateState.ReadyToInstall) {
+    private suspend fun installWhenQuiet(ready: UpdateState.ReadyToInstall, notify: Boolean) {
         while (tts.isBusy) {
             _state.value = ready.copy(waitingForAnnouncement = true)
             delay(1_000)
@@ -248,6 +278,9 @@ class UpdateManager @Inject constructor(
             return
         }
         _state.value = UpdateState.Installing(ready.update)
+        if (notify) progressNotification("Installing KuralPay ${ready.update.version}", "KuralPay restarts by itself in a moment", null)
+        // The new version reads this on MY_PACKAGE_REPLACED and says "Updated to …".
+        prefs.edit().putString(KEY_INSTALLING, ready.update.version.toString()).apply()
         try {
             commitSession(ready.file)
         } catch (e: Exception) {
@@ -266,10 +299,17 @@ class UpdateManager @Inject constructor(
         prefs.edit().putLong(KEY_LAST_AUTO, System.currentTimeMillis()).apply()
         val update = (result as? ReleaseFetch.Ok)?.let { ReleaseSelector.latest(it.releases) } ?: return
         if (!ReleaseSelector.isNewer(update.version, installedVersion)) return
+        downloadThenInstall(update)
+    }
+
+    /** Automatic update: download with a progress notification, then install now, or when KuralPay leaves the screen. */
+    private suspend fun downloadThenInstall(update: AvailableUpdate) {
         Log.d(TAG, "Auto-updating to ${update.version}")
-        downloadAndVerify(update) ?: return
+        downloadAndVerify(update, notify = true) ?: return
         when (val s = _state.value) {
-            is UpdateState.ReadyToInstall -> if (isInForeground()) _autoPromptPending.value = true else installWhenQuiet(s)
+            is UpdateState.ReadyToInstall ->
+                if (isInForeground()) progressNotification("KuralPay ${update.version} is ready", "It installs when you leave KuralPay", null)
+                else installWhenQuiet(s, notify = true)
             is UpdateState.NeedsInstallPermission -> notifyNeedsAction(
                 "KuralPay ${update.version} is ready",
                 "Allow KuralPay to install updates, then open KuralPay to finish.",
@@ -315,8 +355,14 @@ class UpdateManager @Inject constructor(
                 if (isInForeground() && runCatching { context.startActivity(intent) }.isSuccess) return
                 notifyNeedsAction("KuralPay update ready", "Tap to finish installing the update.", intent)
             }
-            PackageInstaller.STATUS_FAILURE_ABORTED -> _state.value = UpdateState.Failed("The update was cancelled.", update)
+            PackageInstaller.STATUS_FAILURE_ABORTED -> {
+                prefs.edit().remove(KEY_INSTALLING).apply()
+                doneNotification("KuralPay update cancelled", "Nothing was changed.")
+                _state.value = UpdateState.Failed("The update was cancelled.", update)
+            }
             else -> {
+                prefs.edit().remove(KEY_INSTALLING).apply()
+                doneNotification("KuralPay update failed", "Android couldn't install it. It will try again later.")
                 Log.w(TAG, "Install failed: status $status ($message)")
                 _state.value = UpdateState.Failed("Android couldn't install the update. Try again later.", update)
             }
@@ -339,6 +385,29 @@ class UpdateManager @Inject constructor(
         runCatching { manager.notify(NOTIFY_ID, notification) }
     }
 
+    private fun progressNotification(title: String, text: String, percent: Int?) {
+        NotificationHelper.createUpdatesChannel(context)
+        val builder = NotificationCompat.Builder(context, NotificationHelper.UPDATES_CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.stat_sys_download)
+            .setContentTitle(title)
+            .setContentText(text)
+            .setOnlyAlertOnce(true)
+            .setOngoing(true)
+            .setProgress(100, percent ?: 0, percent == null)
+        runCatching { context.getSystemService(NotificationManager::class.java).notify(PROGRESS_ID, builder.build()) }
+    }
+
+    private fun doneNotification(title: String, text: String) {
+        NotificationHelper.createUpdatesChannel(context)
+        val notification = NotificationCompat.Builder(context, NotificationHelper.UPDATES_CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.stat_sys_download_done)
+            .setContentTitle(title)
+            .setContentText(text)
+            .setAutoCancel(true)
+            .build()
+        runCatching { context.getSystemService(NotificationManager::class.java).notify(PROGRESS_ID, notification) }
+    }
+
     private fun isInForeground(): Boolean {
         val info = ActivityManager.RunningAppProcessInfo()
         ActivityManager.getMyMemoryState(info)
@@ -357,11 +426,38 @@ class UpdateManager @Inject constructor(
         if (!busyWithUpdate()) updatesDir.listFiles()?.forEach { it.delete() }
     }
 
-    private companion object {
-        const val TAG = "UpdateManager"
-        const val KEY_LAST_AUTO = "last_auto_check"
-        const val KEY_AUTO_INSTALL = "auto_install"
-        const val NOTIFY_ID = 4107
-        const val AUTO_INTERVAL_MS = 6 * 60 * 60 * 1000L
+    companion object {
+        private const val TAG = "UpdateManager"
+        private const val PREFS = "release_orbit"
+        private const val KEY_LAST_AUTO = "last_auto_check"
+        private const val KEY_AUTO_INSTALL = "auto_install"
+        private const val NOTIFY_ID = 4107
+        private const val PROGRESS_ID = 4108
+        private const val KEY_INSTALLING = "installing_version"
+        private const val AUTO_INSTALL_INTERVAL_MS = 60 * 60 * 1000L
+        private const val AUTO_INTERVAL_MS = 6 * 60 * 60 * 1000L
+
+        /**
+         * Called by the new version on MY_PACKAGE_REPLACED: if KuralPay installed this update itself, replace the
+         * "Installing…" notification with "KuralPay updated to x.y.z". USB and manual installs stay quiet.
+         */
+        fun announceIfJustUpdated(context: Context) {
+            val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            prefs.getString(KEY_INSTALLING, null) ?: return
+            prefs.edit().remove(KEY_INSTALLING).apply()
+            val version = runCatching { context.packageManager.getPackageInfo(context.packageName, 0).versionName }.getOrNull() ?: return
+            NotificationHelper.createUpdatesChannel(context)
+            val open = context.packageManager.getLaunchIntentForPackage(context.packageName)?.let {
+                PendingIntent.getActivity(context, PROGRESS_ID, it, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+            }
+            val notification = NotificationCompat.Builder(context, NotificationHelper.UPDATES_CHANNEL_ID)
+                .setSmallIcon(android.R.drawable.stat_sys_download_done)
+                .setContentTitle("KuralPay updated to $version")
+                .setContentText("Your payments, settings and sign-in are kept. Announcements are on.")
+                .setContentIntent(open)
+                .setAutoCancel(true)
+                .build()
+            runCatching { context.getSystemService(NotificationManager::class.java).notify(PROGRESS_ID, notification) }
+        }
     }
 }

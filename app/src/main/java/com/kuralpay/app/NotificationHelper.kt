@@ -11,6 +11,7 @@ object NotificationHelper {
     const val ANNOUNCEMENT_CHANNEL_ID = "announcement_service"
     const val MISSED_CHANNEL_ID = "missed_announcements"
     const val HEALTH_CHANNEL_ID = "audio_health"
+    const val UPDATES_CHANNEL_ID = "app_updates"
 
     fun createChannels(context: Context) {
         val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
@@ -25,6 +26,15 @@ object NotificationHelper {
         )
         manager.createNotificationChannel(
             NotificationChannel(HEALTH_CHANNEL_ID, "Audio Health", NotificationManager.IMPORTANCE_LOW)
+        )
+        createUpdatesChannel(context)
+    }
+
+    /** Download and install progress of KuralPay updates. Also created on demand: updates can run before the app is opened. */
+    fun createUpdatesChannel(context: Context) {
+        val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        manager.createNotificationChannel(
+            NotificationChannel(UPDATES_CHANNEL_ID, "App updates", NotificationManager.IMPORTANCE_LOW)
         )
     }
 
