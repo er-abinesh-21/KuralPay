@@ -4,6 +4,8 @@ import android.app.Application
 import androidx.hilt.work.HiltWorkerFactory
 import androidx.work.Configuration
 import com.kuralpay.app.data.sync.SyncCoordinator
+import com.kuralpay.app.paymentdetection.ListenerWatchdogWorker
+import com.kuralpay.app.update.AutoUpdateWorker
 import dagger.hilt.android.HiltAndroidApp
 import javax.inject.Inject
 
@@ -24,5 +26,7 @@ class KuralPayApplication : Application(), Configuration.Provider {
     override fun onCreate() {
         super.onCreate()
         syncCoordinator.start()
+        ListenerWatchdogWorker.schedule(this)
+        AutoUpdateWorker.schedule(this)
     }
 }

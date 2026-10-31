@@ -63,6 +63,27 @@ class PaymentMessageParserTest {
     @Test fun paytmReceivedFrom() = accepts("Rs.240 received from Karthik S in your Paytm Wallet", 240.0, "Karthik S")
     @Test fun noSenderGiven() = accepts("₹75 received in your account", 75.0, "")
 
+    // IOB sends some credits twice in two formats; both carry the same UPI reference.
+
+    @Test fun iobLongFormat() = accepts(
+        "Your a/c no. XXXXXXXXXXX0329 is credited by Rs.96.00 on 31-Oct-2026 10:30:58 AM, from K MOHANRAJ  .-mkmaa1988-1@oksbi(UPI Ref no 630412873867).Payer Remark - UPI -IOB",
+        96.0, "K Mohanraj"
+    )
+
+    @Test fun iobDuplicateFormatsShareReference() {
+        val long = "Your a/c no. XXXXXXXXXXX0329 is credited by Rs.24.00 on 30-Oct-2026 08:01:44 PM, from M PUSPHA-mahalakshmi6911@okicici(UPI Ref no 630302537925).Payer Remark - UPI -IOB"
+        val short = "Your a/c no. XXXXX29 is credited by Rs.24.00 on 2026-10-30 20:01:44.022, from M PUSPHA-mahalakshmi6911!okicici(UPI Ref no 630302537925).Payer Remark - UPI -IOB"
+        assertEquals("630302537925", PaymentMessageParser.reference(long))
+        assertEquals(PaymentMessageParser.reference(long), PaymentMessageParser.reference(short))
+    }
+
+    @Test fun hdfcReferenceInBrackets() = assertEquals(
+        "218915787062",
+        PaymentMessageParser.reference("Rs.200.00 credited to HDFC Bank A/c XX1220 on 25-10-26 from VPA *9795@ptyes (UPI 218915787062)")
+    )
+
+    @Test fun noReference() = assertNull(PaymentMessageParser.reference("₹20.00 received from Gunalan S at 8:17 PM. The amount will be sent to your bank account."))
+
     // GPay Business notifications (title. text), as posted on a shop's phone.
 
     @Test fun gpayBusinessReceived() = accepts(

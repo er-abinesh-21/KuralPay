@@ -1,13 +1,18 @@
 package com.kuralpay.app.update
 
-import android.content.ActivityNotFoundException
+import android.app.ActivityManager
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.content.pm.PackageInstaller
+import android.os.Build
+import androidx.core.app.NotificationCompat
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.provider.Settings
 import android.util.Log
-import androidx.core.content.FileProvider
 import com.kuralpay.app.BuildConfig
+import com.kuralpay.app.NotificationHelper
 import com.kuralpay.app.voice.tts.PaymentTtsEngine
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
@@ -20,6 +25,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.text.DateFormat
 import java.util.Date
@@ -36,12 +42,17 @@ sealed interface UpdateState {
     data class NeedsInstallPermission(val update: AvailableUpdate, val file: File) : UpdateState
     /** [waitingForAnnouncement] is true while a payment is being spoken; installation starts right after. */
     data class ReadyToInstall(val update: AvailableUpdate, val file: File, val waitingForAnnouncement: Boolean = false) : UpdateState
+    data class Installing(val update: AvailableUpdate) : UpdateState
     data class Failed(val message: String, val update: AvailableUpdate?) : UpdateState
 }
 
 /**
- * Finds, downloads, verifies and hands KuralPay updates from Release Orbit to Android's installer.
- * Installing always needs the person's confirmation in the system dialog; nothing is installed silently.
+ * Finds, downloads, verifies and installs KuralPay updates from Release Orbit.
+ *
+ * Every APK is verified (size, SHA-256, package, version, signing certificate) before it is installed.
+ * Installing goes through a PackageInstaller session that asks Android for no confirmation: allowed
+ * because KuralPay updates itself and declares UPDATE_PACKAGES_WITHOUT_USER_ACTION. When Android still
+ * wants the person to confirm, they are asked (directly, or through a notification in the background).
  */
 @Singleton
 class UpdateManager @Inject constructor(
@@ -65,6 +76,19 @@ class UpdateManager @Inject constructor(
     /** An automatic check found an update; shown when the person is on Home and nothing is being announced. */
     private val _autoPromptPending = MutableStateFlow(false)
     val autoPromptPending: StateFlow<Boolean> = _autoPromptPending.asStateFlow()
+
+    /** "Install updates automatically" in Settings; on unless the person turns it off. */
+    private val _autoInstall = MutableStateFlow(true)
+    val autoInstall: StateFlow<Boolean> = _autoInstall.asStateFlow()
+
+    init {
+        _autoInstall.value = prefs.getBoolean(KEY_AUTO_INSTALL, true)
+    }
+
+    fun setAutoInstall(on: Boolean) {
+        prefs.edit().putBoolean(KEY_AUTO_INSTALL, on).apply()
+        _autoInstall.value = on
+    }
 
     private var dismissedThisSession: SemVer? = null
     private var work: Job? = null
@@ -144,33 +168,41 @@ class UpdateManager @Inject constructor(
             else -> return
         }
         work?.cancel()
-        work = scope.launch {
-            val target = File(updatesDir, kuralPayApkName(update.version))
-            try {
-                _state.value = UpdateState.Downloading(update, 0, update.apk.size)
-                val expectedSha = update.checksum?.let { runCatching { ReleaseSelector.parseSha256(downloader.downloadText(it.downloadUrl)) }.getOrNull() }
-                val actualSha = downloader.download(update.apk.downloadUrl, target, update.apk.size) { done, total ->
-                    _state.value = UpdateState.Downloading(update, done, total)
+        work = scope.launch { downloadAndVerify(update) }
+    }
+
+    /** Downloads and verifies [update]; on success the state is ReadyToInstall or NeedsInstallPermission. */
+    private suspend fun downloadAndVerify(update: AvailableUpdate): File? {
+        val target = File(updatesDir, kuralPayApkName(update.version))
+        try {
+            _state.value = UpdateState.Downloading(update, 0, update.apk.size)
+            val expectedSha = update.checksum?.let { runCatching { ReleaseSelector.parseSha256(downloader.downloadText(it.downloadUrl)) }.getOrNull() }
+            val actualSha = downloader.download(update.apk.downloadUrl, target, update.apk.size) { done, total ->
+                _state.value = UpdateState.Downloading(update, done, total)
+            }
+            _state.value = UpdateState.Verifying(update)
+            return when (val check = verifier.verify(target, update.apk.size, expectedSha, actualSha)) {
+                is ApkCheck.Rejected -> {
+                    target.delete()
+                    _state.value = UpdateState.Failed("${check.reason}. The update was not installed.", update)
+                    null
                 }
-                _state.value = UpdateState.Verifying(update)
-                when (val check = verifier.verify(target, update.apk.size, expectedSha, actualSha)) {
-                    is ApkCheck.Rejected -> {
-                        target.delete()
-                        _state.value = UpdateState.Failed("${check.reason}. The update was not installed.", update)
-                    }
-                    is ApkCheck.Accepted -> _state.value =
+                is ApkCheck.Accepted -> {
+                    _state.value =
                         if (canRequestInstalls()) UpdateState.ReadyToInstall(update, target)
                         else UpdateState.NeedsInstallPermission(update, target)
+                    target
                 }
-            } catch (e: CancellationException) {
-                target.delete()
-                _state.value = UpdateState.Available(update)
-                throw e
-            } catch (e: Exception) {
-                Log.w(TAG, "Update download failed: ${e.javaClass.simpleName}")
-                target.delete()
-                _state.value = UpdateState.Failed("The download didn't finish. Check your connection and try again.", update)
             }
+        } catch (e: CancellationException) {
+            target.delete()
+            _state.value = UpdateState.Available(update)
+            throw e
+        } catch (e: Exception) {
+            Log.w(TAG, "Update download failed: ${e.javaClass.simpleName}")
+            target.delete()
+            _state.value = UpdateState.Failed("The download didn't finish. Check your connection and try again.", update)
+            return null
         }
     }
 
@@ -192,37 +224,125 @@ class UpdateManager @Inject constructor(
         }
     }
 
-    /** Waits for any announcement in progress to finish, then opens Android's installer for confirmation. */
+    /** Waits for any announcement in progress to finish, then installs (with no confirmation when Android allows it). */
     fun install(activityContext: Context) {
         val s = _state.value as? UpdateState.ReadyToInstall ?: return
         work?.cancel()
-        work = scope.launch {
-            while (tts.isBusy) {
-                _state.value = s.copy(waitingForAnnouncement = true)
-                delay(1_000)
+        work = scope.launch { installWhenQuiet(s) }
+    }
+
+    private suspend fun installWhenQuiet(ready: UpdateState.ReadyToInstall) {
+        while (tts.isBusy) {
+            _state.value = ready.copy(waitingForAnnouncement = true)
+            delay(1_000)
+        }
+        if (!ready.file.isFile) {
+            _state.value = UpdateState.Failed("The downloaded update is gone. Download it again.", ready.update)
+            return
+        }
+        _state.value = UpdateState.Installing(ready.update)
+        try {
+            commitSession(ready.file)
+        } catch (e: Exception) {
+            Log.w(TAG, "Install session failed: ${e.javaClass.simpleName}")
+            _state.value = UpdateState.Failed("The update couldn't be installed. Try again.", ready.update)
+        }
+    }
+
+    /**
+     * Automatic update, run by [AutoUpdateWorker]: check, download, verify and install while KuralPay
+     * isn't on screen and nothing is being announced. If KuralPay is open, it waits for the next run.
+     */
+    suspend fun autoUpdate() {
+        if (!_autoInstall.value || busyWithUpdate() || isInForeground()) return
+        val result = client.fetch()
+        prefs.edit().putLong(KEY_LAST_AUTO, System.currentTimeMillis()).apply()
+        val update = (result as? ReleaseFetch.Ok)?.let { ReleaseSelector.latest(it.releases) } ?: return
+        if (!ReleaseSelector.isNewer(update.version, installedVersion)) return
+        Log.d(TAG, "Auto-updating to ${update.version}")
+        downloadAndVerify(update) ?: return
+        when (val s = _state.value) {
+            is UpdateState.ReadyToInstall -> if (isInForeground()) _autoPromptPending.value = true else installWhenQuiet(s)
+            is UpdateState.NeedsInstallPermission -> notifyNeedsAction(
+                "KuralPay ${update.version} is ready",
+                "Allow KuralPay to install updates, then open KuralPay to finish.",
+                Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${context.packageName}"))
+            )
+            else -> Unit
+        }
+    }
+
+    /** Writes the verified APK into a PackageInstaller session and commits it; the result comes to [InstallResultReceiver]. */
+    private suspend fun commitSession(apk: File) = withContext(Dispatchers.IO) {
+        val installer = context.packageManager.packageInstaller
+        val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL).apply {
+            setAppPackageName(context.packageName)
+            setSize(apk.length())
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) setRequireUserAction(PackageInstaller.SessionParams.USER_ACTION_NOT_REQUIRED)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) setPackageSource(PackageInstaller.PACKAGE_SOURCE_DOWNLOADED_FILE)
+        }
+        val sessionId = installer.createSession(params)
+        installer.openSession(sessionId).use { session ->
+            session.openWrite("base.apk", 0, apk.length()).use { out ->
+                apk.inputStream().use { it.copyTo(out) }
+                session.fsync(out)
             }
-            _state.value = s.copy(waitingForAnnouncement = false)
-            if (!s.file.isFile) {
-                _state.value = UpdateState.Failed("The downloaded update is gone. Download it again.", s.update)
-                return@launch
+            val callback = PendingIntent.getBroadcast(
+                context,
+                sessionId,
+                Intent(context, InstallResultReceiver::class.java).setPackage(context.packageName),
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE
+            )
+            session.commit(callback.intentSender)
+        }
+    }
+
+    /** Result of a commit. On success Android replaces KuralPay and restarts its services (MY_PACKAGE_REPLACED). */
+    fun onInstallResult(status: Int, message: String?, confirm: Intent?) {
+        val update = (_state.value as? UpdateState.Installing)?.update
+        when (status) {
+            PackageInstaller.STATUS_SUCCESS -> Log.d(TAG, "Update installed")
+            PackageInstaller.STATUS_PENDING_USER_ACTION -> {
+                val intent = confirm?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) ?: return
+                // Android wants a confirmation: show it now if KuralPay is open, otherwise as a notification.
+                if (isInForeground() && runCatching { context.startActivity(intent) }.isSuccess) return
+                notifyNeedsAction("KuralPay update ready", "Tap to finish installing the update.", intent)
             }
-            val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", s.file)
-            val intent = Intent(Intent.ACTION_VIEW).apply {
-                setDataAndType(uri, "application/vnd.android.package-archive")
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
-            try {
-                activityContext.startActivity(intent)
-            } catch (_: ActivityNotFoundException) {
-                _state.value = UpdateState.Failed("This phone's installer couldn't be opened.", s.update)
+            PackageInstaller.STATUS_FAILURE_ABORTED -> _state.value = UpdateState.Failed("The update was cancelled.", update)
+            else -> {
+                Log.w(TAG, "Install failed: status $status ($message)")
+                _state.value = UpdateState.Failed("Android couldn't install the update. Try again later.", update)
             }
         }
+    }
+
+    private fun notifyNeedsAction(title: String, text: String, intent: Intent) {
+        val manager = context.getSystemService(NotificationManager::class.java)
+        val tap = PendingIntent.getActivity(
+            context, NOTIFY_ID, intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val notification = NotificationCompat.Builder(context, NotificationHelper.MISSED_CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.stat_sys_download_done)
+            .setContentTitle(title)
+            .setContentText(text)
+            .setContentIntent(tap)
+            .setAutoCancel(true)
+            .build()
+        runCatching { manager.notify(NOTIFY_ID, notification) }
+    }
+
+    private fun isInForeground(): Boolean {
+        val info = ActivityManager.RunningAppProcessInfo()
+        ActivityManager.getMyMemoryState(info)
+        return info.importance <= ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND
     }
 
     private fun canRequestInstalls() = context.packageManager.canRequestPackageInstalls()
 
     private fun busyWithUpdate() = _state.value.let {
-        it is UpdateState.Downloading || it is UpdateState.Verifying || it is UpdateState.ReadyToInstall || it is UpdateState.NeedsInstallPermission
+        it is UpdateState.Downloading || it is UpdateState.Verifying || it is UpdateState.ReadyToInstall ||
+            it is UpdateState.NeedsInstallPermission || it is UpdateState.Installing
     }
 
     /** Old downloads are useless once this version is running; remove them so they never sit in storage. */
@@ -233,6 +353,8 @@ class UpdateManager @Inject constructor(
     private companion object {
         const val TAG = "UpdateManager"
         const val KEY_LAST_AUTO = "last_auto_check"
+        const val KEY_AUTO_INSTALL = "auto_install"
+        const val NOTIFY_ID = 4107
         const val AUTO_INTERVAL_MS = 6 * 60 * 60 * 1000L
     }
 }

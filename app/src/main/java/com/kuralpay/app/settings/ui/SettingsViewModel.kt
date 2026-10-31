@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import com.kuralpay.app.paymentdetection.MissedSmsRecovery
 import javax.inject.Inject
 
 data class SettingsState(
@@ -35,8 +36,16 @@ data class SettingsState(
 class SettingsViewModel @Inject constructor(
     private val settingsRepository: SettingsRepository,
     private val ttsEngine: PaymentTtsEngine,
-    private val auth: AuthRepository
+    private val auth: AuthRepository,
+    private val missedSms: MissedSmsRecovery
 ) : ViewModel() {
+
+    fun canReadSms(): Boolean = missedSms.hasPermission()
+
+    /** Runs right after the SMS permission is granted, so today's missed bank credits appear at once. */
+    fun recoverMissedSms(onDone: (Int) -> Unit) = viewModelScope.launch {
+        onDone(missedSms.recover())
+    }
 
     fun setRetentionDays(days: Int) = viewModelScope.launch { settingsRepository.setRetentionDays(days) }
     fun signOut() = auth.signOut()

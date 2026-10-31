@@ -13,6 +13,18 @@ interface TransactionDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(transaction: TransactionEntity): Long
 
+    /** A payment with this UPI/bank reference was already recorded (banks may send one credit twice). */
+    @Query("SELECT COUNT(*) FROM transactions WHERE rawNotification LIKE '%' || :reference || '%' AND timestamp >= :since")
+    suspend fun countWithReference(reference: String, since: Long): Int
+
+    /** A payment of this amount was recorded around this time (for messages that carry no reference). */
+    @Query("SELECT COUNT(*) FROM transactions WHERE amount = :amount AND timestamp BETWEEN :from AND :to")
+    suspend fun countSameAmountBetween(amount: Double, from: Long, to: Long): Int
+
+    /** This exact notification was already recorded, e.g. before Android stopped and restarted the app. */
+    @Query("SELECT COUNT(*) FROM transactions WHERE rawNotification = :raw AND timestamp = :postTime")
+    suspend fun countSameNotification(raw: String, postTime: Long): Int
+
     @Query("SELECT * FROM transactions ORDER BY timestamp DESC")
     fun getAllTransactions(): Flow<List<TransactionEntity>>
 

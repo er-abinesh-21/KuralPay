@@ -14,8 +14,12 @@
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.USE_BIOMETRIC" />
+    <!-- Optional: find bank credit SMS that arrived while Android had KuralPay stopped. Read only. -->
+    <uses-permission android:name="android.permission.READ_SMS" />
     <!-- In-app updates from Release Orbit. Android still asks the person to confirm every install. -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- KuralPay updating itself from Release Orbit without a confirmation dialog (Android 12+). -->
+    <uses-permission android:name="android.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION" />
 
     <!-- Android 11+ hides other apps unless declared: needed to find speech engines and the speech recogniser. -->
     <queries>
@@ -65,6 +69,10 @@
             android:name=".voice.tts.AnnouncementService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
+
+        <receiver
+            android:name=".update.InstallResultReceiver"
+            android:exported="false" />
 
         <receiver
             android:name=".voice.routing.AudioDeviceMonitor"

@@ -92,7 +92,7 @@ private fun UpdateSheet(manager: UpdateManager) {
     val c = Kp.colors
     val context = LocalContext.current
     val state by manager.state.collectAsState()
-    val dismissible = state !is UpdateState.Verifying
+    val dismissible = state !is UpdateState.Verifying && state !is UpdateState.Installing
 
     // Coming back from "Install unknown apps": pick up the new permission without another tap.
     LaunchedEffect(state) {
@@ -150,6 +150,7 @@ private fun UpdateSheet(manager: UpdateManager) {
                             if (s.waitingForAnnouncement) Busy("Waiting for the current payment announcement to finish…")
                             else Buttons(primary = "Install" to { manager.install(context) }, secondary = "Later" to { manager.hideSheet() })
                         }
+                        is UpdateState.Installing -> Busy("Installing… KuralPay will close and reopen with the new version.")
                         is UpdateState.Failed -> {
                             Centered(Icons.Rounded.ErrorOutline, c.warn, "Update not completed", s.message)
                             Buttons(
@@ -172,6 +173,7 @@ private fun Header(state: UpdateState, installed: String) {
         is UpdateState.Verifying -> state.update
         is UpdateState.NeedsInstallPermission -> state.update
         is UpdateState.ReadyToInstall -> state.update
+        is UpdateState.Installing -> state.update
         is UpdateState.Failed -> state.update
         else -> null
     }

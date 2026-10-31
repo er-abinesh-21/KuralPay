@@ -12,6 +12,7 @@ import com.kuralpay.app.domain.model.ParsedPayment
 import com.kuralpay.app.domain.model.PaymentSource
 import com.kuralpay.app.forwarding.ForwardingRepository
 import com.kuralpay.app.paymentdetection.PaymentEventBus
+import com.kuralpay.app.paymentdetection.PaymentNotificationListener
 import com.kuralpay.app.voice.queue.AnnouncementQueueManager
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
@@ -72,6 +73,8 @@ class AnnouncementService : Service() {
                 "Payment announcements are active"
             )
         )
+        // Restarted after Android stopped the app: make sure payment notifications reach us again.
+        PaymentNotificationListener.ensureConnected(this)
         return START_STICKY
     }
 

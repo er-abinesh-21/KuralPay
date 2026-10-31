@@ -169,7 +169,8 @@ class ForwardingRepository @Inject constructor(
     // ---- Sending ----------------------------------------------------------------------------
 
     /** Sends one detected payment to everyone who accepted me and hasn't muted me. Only amount and payer leave the phone. */
-    suspend fun forward(amount: Double, payer: String) {
+    /** [timestamp] is when the payment arrived, so one recovered late is listed but not read out late on the other phone. */
+    suspend fun forward(amount: Double, payer: String, timestamp: Long = System.currentTimeMillis()) {
         val user = auth.currentUser ?: return
         // The name I saved in KuralPay, so the announcement matches what linked people see in their list.
         val myName = runCatching { db.collection("users").document(user.uid).get().await().getString("displayName") }
@@ -183,7 +184,7 @@ class ForwardingRepository @Inject constructor(
                     mapOf(
                         "fromUid" to user.uid, "fromName" to myName,
                         "amount" to amount, "payer" to payer,
-                        "ts" to System.currentTimeMillis(), "heard" to false
+                        "ts" to timestamp, "heard" to false
                     )
                 ).await()
             } catch (e: Exception) {

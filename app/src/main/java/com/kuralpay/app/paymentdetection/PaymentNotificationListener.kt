@@ -1,23 +1,21 @@
 package com.kuralpay.app.paymentdetection
 
 import android.app.Notification
+import android.content.ComponentName
+import android.content.Context
+import android.content.Intent
 import android.os.Bundle
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import android.util.Log
-import com.kuralpay.app.data.repository.AnnouncementRepository
-import com.kuralpay.app.data.repository.SettingsRepository
-import com.kuralpay.app.data.repository.TransactionRepository
-import com.kuralpay.app.data.sync.CloudSyncRepository
-import com.kuralpay.app.forwarding.ForwardingRepository
-import kotlinx.coroutines.flow.first
-import com.kuralpay.app.domain.model.Announcement
-import com.kuralpay.app.domain.model.Transaction
+import androidx.core.content.ContextCompat
 import com.kuralpay.app.paymentdetection.parser.PaymentParserEngine
+import com.kuralpay.app.voice.tts.AnnouncementService
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -25,11 +23,8 @@ import javax.inject.Inject
 class PaymentNotificationListener : NotificationListenerService() {
 
     @Inject lateinit var parserEngine: PaymentParserEngine
-    @Inject lateinit var transactionRepository: TransactionRepository
-    @Inject lateinit var announcementRepository: AnnouncementRepository
-    @Inject lateinit var forwardingRepository: ForwardingRepository
-    @Inject lateinit var cloudSync: CloudSyncRepository
-    @Inject lateinit var settingsRepository: SettingsRepository
+    @Inject lateinit var recorder: PaymentRecorder
+    @Inject lateinit var missedSms: MissedSmsRecovery
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -37,6 +32,34 @@ class PaymentNotificationListener : NotificationListenerService() {
     private val recentlySeen = LinkedHashMap<String, Long>()
 
     override fun onNotificationPosted(sbn: StatusBarNotification) {
+        scope.launch { handle(sbn, recovered = false) }
+    }
+
+    /**
+     * On low-memory phones Android stops KuralPay and later reconnects this listener. Payments that
+     * arrived in between are still in the notification shade or the SMS inbox: record and forward them,
+     * and read out only recent ones.
+     */
+    override fun onListenerConnected() {
+        Log.d(TAG, "Connected")
+        startAnnouncements(this)
+        scope.launch {
+            delay(RECOVERY_DELAY_MS) // let the voice engine start before anything is spoken
+            val now = System.currentTimeMillis()
+            val pending = runCatching { activeNotifications }.getOrNull().orEmpty()
+                .filter { now - it.postTime <= RECOVERY_WINDOW_MS }
+                .sortedBy { it.postTime }
+            pending.forEach { handle(it, recovered = true) }
+            missedSms.recover()
+        }
+    }
+
+    override fun onListenerDisconnected() {
+        Log.w(TAG, "Disconnected; asking Android to reconnect")
+        NotificationListenerService.requestRebind(ComponentName(this, PaymentNotificationListener::class.java))
+    }
+
+    private suspend fun handle(sbn: StatusBarNotification, recovered: Boolean) {
         if (sbn.packageName == packageName || sbn.isOngoing) return
         val notification = sbn.notification
         if (notification.flags and Notification.FLAG_GROUP_SUMMARY != 0) return
@@ -49,36 +72,17 @@ class PaymentNotificationListener : NotificationListenerService() {
             ?: return
         val source = sbn.packageName
 
-        scope.launch {
-            val parsed = parserEngine.parse(source, title, body) ?: return@launch
-            // Title too: GPay Business keeps the payer and time there and repeats the same body for every payment.
-            if (!firstTimeSeen("$source|${parsed.amount}|${title.trim()}|${body.trim()}")) return@launch
-            Log.d(TAG, "Payment ₹${parsed.amount} from '${parsed.sender}' via ${parsed.source} ($source)")
-
-            val transaction = Transaction(
-                amount = parsed.amount,
-                sender = parsed.sender,
-                sourceApp = parsed.source,
-                timestamp = sbn.postTime,
-                rawNotification = parsed.rawText
-            )
-            transactionRepository.recordTransaction(transaction)
-            cloudSync.uploadTransaction(transaction)
-            val announcementId = announcementRepository.enqueue(
-                Announcement(
-                    amount = parsed.amount,
-                    sender = parsed.sender,
-                    sourceApp = parsed.source,
-                    timestamp = sbn.postTime
-                )
-            )
-            PaymentEventBus.emit(parsed.copy(announcementId = announcementId))
-
-            if (settingsRepository.forwardingEnabled.first()) {
-                runCatching { forwardingRepository.forward(parsed.amount, parsed.sender) }
-                    .onFailure { Log.w(TAG, "Forwarding failed", it) }
-            }
-        }
+        val parsed = parserEngine.parse(source, title, body) ?: return
+        // Title too: GPay Business keeps the payer and time there and repeats the same body for every payment.
+        if (!firstTimeSeen("$source|${parsed.amount}|${title.trim()}|${body.trim()}")) return
+        // A payment found minutes later stays in "Replay missed" rather than being read out late.
+        val late = recovered && System.currentTimeMillis() - sbn.postTime > ANNOUNCE_LATE_MS
+        recorder.record(
+            parsed,
+            receivedAt = sbn.postTime,
+            speak = !late,
+            origin = if (recovered) PaymentRecorder.ORIGIN_SHADE else PaymentRecorder.ORIGIN_LIVE
+        )
     }
 
     /** Messaging-style notifications (SMS apps) keep each message separately; the last one is the new one. */
@@ -98,12 +102,22 @@ class PaymentNotificationListener : NotificationListenerService() {
 
     override fun onNotificationRemoved(sbn: StatusBarNotification) {}
 
-    override fun onListenerConnected() {
-        Log.d(TAG, "Connected")
-    }
+    companion object {
+        private const val TAG = "PaymentNotificationListener"
+        private const val DEDUPE_WINDOW_MS = 15 * 60 * 1000L
+        private const val RECOVERY_WINDOW_MS = 6 * 60 * 60 * 1000L
+        private const val RECOVERY_DELAY_MS = 3_000L
+        private const val ANNOUNCE_LATE_MS = 5 * 60 * 1000L
 
-    private companion object {
-        const val TAG = "PaymentNotificationListener"
-        const val DEDUPE_WINDOW_MS = 15 * 60 * 1000L
+        /** Asks Android to reconnect the listener if it was dropped, e.g. after the app was stopped for memory. */
+        fun ensureConnected(context: Context) {
+            runCatching { NotificationListenerService.requestRebind(ComponentName(context, PaymentNotificationListener::class.java)) }
+                .onFailure { Log.w(TAG, "requestRebind failed", it) }
+        }
+
+        private fun startAnnouncements(context: Context) {
+            runCatching { ContextCompat.startForegroundService(context, Intent(context, AnnouncementService::class.java)) }
+                .onFailure { Log.w(TAG, "Couldn't start announcements from the listener", it) }
+        }
     }
 }

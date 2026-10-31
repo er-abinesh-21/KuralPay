@@ -34,6 +34,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.kuralpay.app.update.ui.UpdateHost
@@ -90,6 +91,7 @@ fun KuralPayNavGraph(
 
     // Quiet update check on launch; never blocks startup or announcements.
     val updates: UpdateViewModel = hiltViewModel()
+    val autoUpdate by updates.manager.autoInstall.collectAsState()
     LaunchedEffect(Unit) { updates.checkOnLaunch() }
 
     fun goTab(route: String) {
@@ -124,7 +126,9 @@ fun KuralPayNavGraph(
                     onNavigateToSummary = { navController.navigate(Routes.SUMMARY) },
                     onNavigateToForwarding = { navController.navigate(Routes.FORWARDING) },
                     onNavigateToAbout = { navController.navigate(Routes.ABOUT) },
-                    onCheckUpdates = updates::checkNow
+                    onCheckUpdates = updates::checkNow,
+                    autoUpdate = autoUpdate,
+                    onAutoUpdateChange = updates.manager::setAutoInstall
                 )
             }
             composable(

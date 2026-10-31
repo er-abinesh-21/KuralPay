@@ -44,6 +44,17 @@ object PaymentMessageParser {
     private val amountPattern = Regex("""(?:₹|\brs\.?|\binr)\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)""", IGNORE_CASE)
     private val balanceBefore = Regex("""(bal|balance|avl|available|limit)\W{0,6}$""", IGNORE_CASE)
 
+    private val referencePattern = Regex(
+        """\b(?:upi\s*ref(?:erence)?|upi|ref(?:erence)?|utr|rrn|txn\s*id|transaction\s*id)\s*(?:no\.?|number|id)?\s*[:.\-]?\s*(\d{9,18})\b""",
+        IGNORE_CASE
+    )
+
+    /**
+     * The UPI / bank reference number, if the message has one. Banks sometimes send the same credit
+     * twice in different formats (IOB: "AX-IOBCHN" then "BV-IOBCHN"); the reference is the same.
+     */
+    fun reference(text: String): String? = referencePattern.find(text)?.groupValues?.get(1)
+
     fun parse(text: String): Result? {
         val clean = text.replace(Regex("""[⁦-⁩‎‏]"""), "").replace(Regex("""\s+"""), " ").trim()
         if (clean.isEmpty()) return null
@@ -87,7 +98,7 @@ object PaymentMessageParser {
 
     /** "POORANI  B" -> "Poorani B"; mixed-case names are left as written. */
     private fun tidyName(raw: String): String {
-        val collapsed = raw.replace(Regex("""\s+"""), " ").trim().trimEnd('.')
+        val collapsed = raw.replace(Regex("""\s+"""), " ").trim().trimEnd('.').trim()
         if (collapsed != collapsed.uppercase()) return collapsed
         return collapsed.split(" ").joinToString(" ") { w ->
             if (w.length <= 1) w else w.first() + w.drop(1).lowercase()

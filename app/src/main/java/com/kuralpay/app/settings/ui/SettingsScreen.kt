@@ -1,5 +1,7 @@
 package com.kuralpay.app.settings.ui
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.togetherWith
@@ -35,6 +37,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.VolumeUp
 import androidx.compose.material.icons.automirrored.rounded.Send
+import androidx.compose.material.icons.rounded.Autorenew
 import androidx.compose.material.icons.rounded.Campaign
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.ChevronRight
@@ -45,6 +48,7 @@ import androidx.compose.material.icons.rounded.SystemUpdate
 import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material.icons.rounded.Schedule
+import androidx.compose.material.icons.rounded.Sms
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
@@ -119,6 +123,8 @@ fun SettingsScreen(
     onNavigateToForwarding: () -> Unit = {},
     onNavigateToAbout: () -> Unit = {},
     onCheckUpdates: () -> Unit = {},
+    autoUpdate: Boolean = true,
+    onAutoUpdateChange: (Boolean) -> Unit = {},
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
     val state by viewModel.state.collectAsState()
@@ -126,11 +132,22 @@ fun SettingsScreen(
     val context = LocalContext.current
     val overlaySupported = remember { OverlayAccess.supported(context) }
     var overlayAllowed by remember { mutableStateOf(OverlayAccess.granted(context)) }
+    var smsAllowed by remember { mutableStateOf(viewModel.canReadSms()) }
+    val smsPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        smsAllowed = granted
+        if (granted) viewModel.recoverMissedSms { added ->
+            val text = if (added == 0) "No missed bank payments found" else "Added and forwarded $added missed payment${if (added == 1) "" else "s"}"
+            android.widget.Toast.makeText(context, text, android.widget.Toast.LENGTH_LONG).show()
+        }
+    }
     // Coming back from Android's "Display over other apps" screen. (LifecycleResumeEffect needs Compose UI 1.7.)
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) overlayAllowed = OverlayAccess.granted(context)
+            if (event == Lifecycle.Event.ON_RESUME) {
+                overlayAllowed = OverlayAccess.granted(context)
+                smsAllowed = viewModel.canReadSms()
+            }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
@@ -177,6 +194,20 @@ fun SettingsScreen(
                     "Turns media volume to maximum while speaking, then sets it back"
                 ) {
                     KpSwitch(state.maxVolume, { viewModel.toggleMaxVolume() })
+                }
+                Hairline()
+                SettingRow(
+                    Icons.Rounded.Sms,
+                    "Catch missed bank SMS",
+                    if (smsAllowed) "If Android stops KuralPay, bank credits that arrive meanwhile are added and forwarded when it restarts"
+                    else "Lets KuralPay find bank credit SMS it missed while Android had it stopped. Reads only; never sends."
+                ) {
+                    KpSwitch(smsAllowed, { on ->
+                        if (on && !smsAllowed) smsPermission.launch(android.Manifest.permission.READ_SMS)
+                        else if (!on && smsAllowed) context.startActivity(
+                            android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.parse("package:${context.packageName}"))
+                        )
+                    })
                 }
                 Hairline()
                 DurationSlider(state.overlayDuration) { viewModel.setOverlayDuration(it) }
@@ -247,6 +278,14 @@ fun SettingsScreen(
                     modifier = Modifier.kpClickable(onCheckUpdates)
                 ) {
                     Icon(Icons.Rounded.ChevronRight, contentDescription = null, tint = c.muted)
+                }
+                Hairline()
+                SettingRow(
+                    Icons.Rounded.Autorenew,
+                    "Install updates automatically",
+                    "New versions install in the background while KuralPay isn't open and nothing is being announced"
+                ) {
+                    KpSwitch(autoUpdate, onAutoUpdateChange)
                 }
             }
         }
