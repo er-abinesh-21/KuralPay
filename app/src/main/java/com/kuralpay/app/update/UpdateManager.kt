@@ -434,18 +434,21 @@ class UpdateManager @Inject constructor(
         private const val NOTIFY_ID = 4107
         private const val PROGRESS_ID = 4108
         private const val KEY_INSTALLING = "installing_version"
+        private const val KEY_LAST_VERSION = "last_version"
         private const val AUTO_INSTALL_INTERVAL_MS = 60 * 60 * 1000L
         private const val AUTO_INTERVAL_MS = 6 * 60 * 60 * 1000L
 
         /**
-         * Called by the new version on MY_PACKAGE_REPLACED: if KuralPay installed this update itself, replace the
-         * "Installing…" notification with "KuralPay updated to x.y.z". USB and manual installs stay quiet.
+         * Called by the new version on MY_PACKAGE_REPLACED. Replaces the "Installing…" notification with
+         * "KuralPay updated to x.y.z" whenever the version changed, including updates installed by older versions
+         * that showed no progress. Reinstalling the same version stays quiet.
          */
         fun announceIfJustUpdated(context: Context) {
             val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            prefs.getString(KEY_INSTALLING, null) ?: return
-            prefs.edit().remove(KEY_INSTALLING).apply()
             val version = runCatching { context.packageManager.getPackageInfo(context.packageName, 0).versionName }.getOrNull() ?: return
+            val previous = prefs.getString(KEY_LAST_VERSION, null)
+            prefs.edit().remove(KEY_INSTALLING).putString(KEY_LAST_VERSION, version).apply()
+            if (previous == version) return
             NotificationHelper.createUpdatesChannel(context)
             val open = context.packageManager.getLaunchIntentForPackage(context.packageName)?.let {
                 PendingIntent.getActivity(context, PROGRESS_ID, it, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
