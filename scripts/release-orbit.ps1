@@ -74,7 +74,8 @@ $env:KURALPAY_KEYSTORE_PASSWORD = $StorePassword
 $env:KURALPAY_KEY_ALIAS = $KeyAlias
 $env:KURALPAY_KEY_PASSWORD = $KeyPassword
 try {
-    & .\gradlew.bat --no-daemon testDebugUnitTest assembleRelease
+    # clean: version numbers are compile-time constants, and an incremental build can keep stale ones.
+    & .\gradlew.bat --no-daemon clean testDebugUnitTest assembleRelease
     if ($LASTEXITCODE -ne 0) { Fail "Gradle build failed" }
 } finally {
     Remove-Item Env:KURALPAY_KEYSTORE_FILE, Env:KURALPAY_KEYSTORE_PASSWORD, Env:KURALPAY_KEY_ALIAS, Env:KURALPAY_KEY_PASSWORD -ErrorAction SilentlyContinue

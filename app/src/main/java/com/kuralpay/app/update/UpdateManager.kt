@@ -93,7 +93,14 @@ class UpdateManager @Inject constructor(
     private var dismissedThisSession: SemVer? = null
     private var work: Job? = null
 
-    val installedVersion: String get() = BuildConfig.VERSION_NAME
+    /**
+     * Read from Android, not BuildConfig: BuildConfig.VERSION_NAME is a compile-time constant copied into
+     * this class, and an incremental build once left 1.2.0 thinking it was 1.0.0 (offering itself as an update).
+     */
+    val installedVersion: String by lazy {
+        runCatching { context.packageManager.getPackageInfo(context.packageName, 0).versionName }.getOrNull()
+            ?: BuildConfig.VERSION_NAME
+    }
 
     /** Quiet background check on launch, at most once per [AUTO_INTERVAL_MS]. Never blocks startup. */
     fun checkOnLaunch() {

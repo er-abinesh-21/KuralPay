@@ -1,7 +1,6 @@
 package com.kuralpay.app.update
 
 import android.content.Context
-import com.kuralpay.app.BuildConfig
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -46,7 +45,7 @@ class ReleaseOrbitClient @Inject constructor(
                     .url(url)
                     .header("Accept", "application/vnd.github+json")
                     .header("X-GitHub-Api-Version", "2022-11-28")
-                    .header("User-Agent", "KuralPay/${BuildConfig.VERSION_NAME} (Android)")
+                    .header("User-Agent", "KuralPay (Android)")
                 // Conditional request on the first page: a 304 means our cached list is still current.
                 val etag = prefs.getString(KEY_ETAG, null)
                 if (page == 0 && etag != null && cacheFile.exists()) builder.header("If-None-Match", etag)

@@ -22,8 +22,8 @@ android {
         targetSdk = 34
         // Release Orbit convention shared with the other apps: versionCode = major*10000 + minor*100 + patch.
         // scripts/release-orbit.ps1 refuses to publish if these two disagree.
-        versionCode = 10200
-        versionName = "1.2.0"
+        versionCode = 10201
+        versionName = "1.2.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
