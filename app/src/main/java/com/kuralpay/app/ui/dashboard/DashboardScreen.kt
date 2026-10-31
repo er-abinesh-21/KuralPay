@@ -85,6 +85,7 @@ fun DashboardScreen(
 ) {
     val state by viewModel.state.collectAsState()
     val c = Kp.colors
+    val keepRunningNeeded = rememberKeepRunningNeeded()
 
     LazyColumn(
         modifier = Modifier.fillMaxSize().background(c.ink).statusBarsPadding(),
@@ -93,6 +94,9 @@ fun DashboardScreen(
     ) {
         item { TopGreeting(onNavigateToSummary, Modifier.entrance(0)) }
         item { LivePill("Listening for payments", c.good, Modifier.entrance(1)) }
+        if (keepRunningNeeded.value) {
+            item { KeepRunningCard(onDone = { keepRunningNeeded.value = false }, modifier = Modifier.entrance(1)) }
+        }
         item {
             CollectionHero(
                 state = state,

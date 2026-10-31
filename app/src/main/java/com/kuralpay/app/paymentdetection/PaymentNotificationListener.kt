@@ -75,14 +75,26 @@ class PaymentNotificationListener : NotificationListenerService() {
         val parsed = parserEngine.parse(source, title, body) ?: return
         // Title too: GPay Business keeps the payer and time there and repeats the same body for every payment.
         if (!firstTimeSeen("$source|${parsed.amount}|${title.trim()}|${body.trim()}")) return
+        val receivedAt = eventTime(sbn)
         // A payment found minutes later stays in "Replay missed" rather than being read out late.
-        val late = recovered && System.currentTimeMillis() - sbn.postTime > ANNOUNCE_LATE_MS
+        val late = recovered && System.currentTimeMillis() - receivedAt > ANNOUNCE_LATE_MS
         recorder.record(
             parsed,
-            receivedAt = sbn.postTime,
+            receivedAt = receivedAt,
             speak = !late,
             origin = if (recovered) PaymentRecorder.ORIGIN_SHADE else PaymentRecorder.ORIGIN_LIVE
         )
+    }
+
+    /**
+     * When the payment happened. Apps re-post old notifications (GPay Business does when its group changes),
+     * which moves postTime to "now" and once put yesterday's evening payments into today's total.
+     * Notification.when is the time the app gave the event, and it stays the same across re-posts.
+     */
+    private fun eventTime(sbn: StatusBarNotification): Long {
+        val now = System.currentTimeMillis()
+        val `when` = sbn.notification.`when`
+        return if (`when` in (now - EVENT_TIME_MAX_AGE_MS)..(now + 60_000)) minOf(`when`, sbn.postTime) else sbn.postTime
     }
 
     /** Messaging-style notifications (SMS apps) keep each message separately; the last one is the new one. */
@@ -108,6 +120,7 @@ class PaymentNotificationListener : NotificationListenerService() {
         private const val RECOVERY_WINDOW_MS = 6 * 60 * 60 * 1000L
         private const val RECOVERY_DELAY_MS = 3_000L
         private const val ANNOUNCE_LATE_MS = 5 * 60 * 1000L
+        private const val EVENT_TIME_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000L
 
         /** Asks Android to reconnect the listener if it was dropped, e.g. after the app was stopped for memory. */
         fun ensureConnected(context: Context) {

@@ -16,6 +16,8 @@
     <uses-permission android:name="android.permission.USE_BIOMETRIC" />
     <!-- Optional: find bank credit SMS that arrived while Android had KuralPay stopped. Read only. -->
     <uses-permission android:name="android.permission.READ_SMS" />
+    <!-- "Allow KuralPay to always run in the background?" so announcements keep working. -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <!-- In-app updates from Release Orbit. Android still asks the person to confirm every install. -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <!-- KuralPay updating itself from Release Orbit without a confirmation dialog (Android 12+). -->
